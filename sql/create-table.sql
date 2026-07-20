@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS roles (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(25) NOT NULL UNIQUE,
-)
+    name VARCHAR(25) NOT NULL UNIQUE
+); -- Removed the trailing comma and added a semicolon here
 
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
