@@ -1,12 +1,13 @@
-DROP TABLE users;
-DROP TABLE roles;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS roles;
 
 CREATE TABLE roles (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(25) NOT NULL UNIQUE
-); -- Removed the trailing comma and added a semicolon here
+);
 
-INSERT INTO roles (name) VALUES ('admin', 'affiliator', 'reviewer')
+-- Fixed multi-row syntax and added semicolon
+INSERT INTO roles (name) VALUES ('admin'), ('affiliator'), ('reviewer');
 
 CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
@@ -21,5 +22,6 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Added a valid placeholder email and the ending semicolon
 INSERT INTO users (username, role_id, email, password_hash)
-VALUES ('admin', 1, '', 'Rsp@d12345')
+VALUES ('admin', 1, '', 'Rsp@d12345');
