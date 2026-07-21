@@ -65,7 +65,7 @@ try {
         (new ApiResponse(false, 'Invalid username or password'))->send(401);
     }
 
-} catch (\PDOException $e) {
-    error_log("Login Error: " . $e->getMessage());
-    (new ApiResponse(false, 'Internal server error'))->send(500);
+} catch (\Exception $e) {
+    // Temporarily print the real error message for debugging
+    (new ApiResponse(false, 'Debug Error: ' . $e->getMessage()))->send(500);
 }
