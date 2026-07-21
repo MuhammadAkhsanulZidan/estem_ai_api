@@ -25,12 +25,12 @@ if (empty($username) || empty($password)) {
 
 try {
     // Fetch user from PostgreSQL using prepared statements to prevent SQL injection
-    $stmt = $pdo->prepare("SELECT id, username, password FROM users WHERE username = :username");
+    $stmt = $pdo->prepare("SELECT id, username, password_hash FROM users WHERE username = :username");
     $stmt->execute(['username' => $username]);
     $user = $stmt->fetch();
 
     // Verify user exists and check password hash securely
-    if ($user && password_verify($password, $user['password'])) {
+    if ($user && password_verify($password, $user['password_hash'])) {
 
         $issuedAt = time();
         $expirationTime = $issuedAt + 3600; // Token valid for 1 hour
