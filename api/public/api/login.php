@@ -5,55 +5,12 @@ require_once __DIR__ . '/../../vendor/autoload.php';
 require_once __DIR__ . '/../../config/database.php';
 
 use App\Models\ApiResponse;
+use App\Helpers\RequestHelper;
 use Firebase\JWT\JWT;
 
-// Enforce strict POST method requirement
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    (new ApiResponse(false, 'Method Not Allowed. Please use POST.'))->send(405);
-}
-
-// Get the raw incoming JSON payload (expects an encrypted package)
-$rawInput = file_get_contents('php://input');
-$requestData = json_decode($rawInput, true);
-
-// Validate that the required encryption components exist
-if (!isset($requestData['iv'], $requestData['c'], $requestData['t'])) {
-    (new ApiResponse(false, 'Invalid payload structure. Encryption parameters missing.'))->send(400);
-}
-
-// Retrieve the shared secret encryption key (must be 32 bytes for AES-256)
-// Retrieve and decode the Base64 encryption key (results in 32 raw bytes)
-$rawEncryptionKey = $_ENV['ENCRYPTION_KEY'] ?? '';
-$encryptionKey = base64_decode($rawEncryptionKey, true);
-
-if ($encryptionKey === false || mb_strlen($encryptionKey, '8bit') !== 32) {
-    (new ApiResponse(false, 'Server encryption configuration error.'))->send(500);
-}
 try {
-    // Decode base64-encoded encryption components sent by the client
-    $iv = base64_decode($requestData['iv']);
-    $ciphertext = base64_decode($requestData['c']);
-    $tag = base64_decode($requestData['t']);
-
-    // Decrypt the payload using AES-256-GCM
-    $decryptedJson = openssl_decrypt(
-        $ciphertext,
-        'aes-256-gcm',
-        $encryptionKey,
-        OPENSSL_RAW_DATA,
-        $iv,
-        $tag
-    );
-
-    if ($decryptedJson === false) {
-        (new ApiResponse(false, 'Decryption failed. Invalid key or corrupted data.'))->send(400);
-    }
-
-    // Parse the decrypted JSON string into an array
-    $input = json_decode($decryptedJson, true);
-    if (!is_array($input)) {
-        (new ApiResponse(false, 'Invalid decrypted payload format.'))->send(400);
-    }
+    // Get payload (plain JSON or decrypted package) using the helper
+    $input = RequestHelper::post_rq();
 
     $username = trim($input['username'] ?? '');
     $roleId = $input['role_id'] ?? '';
@@ -64,7 +21,7 @@ try {
         (new ApiResponse(false, 'Username and password are required'))->send(400);
     }
 
-    // Fetch user from PostgreSQL using prepared statements to prevent SQL injection
+    // Fetch user from PostgreSQL using prepared statements
     $stmt = $pdo->prepare("
         SELECT id, username, role_id, password_hash
         FROM users
