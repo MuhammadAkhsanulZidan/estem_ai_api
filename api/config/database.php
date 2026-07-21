@@ -26,7 +26,7 @@ try {
 } catch (\PDOException $e) {
     // Log the actual error internally (never output raw DB errors to the user)
     error_log("Database Connection Error: " . $e->getMessage());
-    
+
     http_response_code(500);
-    exit("A database connection error occurred. Please try again later.");
+    exit("DEBUG ERROR: " . $e->getMessage());
 }
