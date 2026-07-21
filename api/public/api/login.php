@@ -7,13 +7,10 @@ require_once __DIR__ . '/../../config/database.php';
 use App\Models\ApiResponse;
 use Firebase\JWT\JWT;
 
-// Enforce strict POST method requirement
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    (new ApiResponse(false, 'Method Not Allowed. Please use POST.'))->send(405);
-}
+use function App\Functions\post_rq;
 
 // Get incoming JSON request payload
-$input = json_decode(file_get_contents('php://input'), true);
+$input = post_rq();
 
 $username = trim($input['username'] ?? '');
 $password = $input['password'] ?? '';
