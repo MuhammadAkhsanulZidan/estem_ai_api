@@ -11,12 +11,7 @@ class RequestHelper {
      * @param bool $isEncrypted Whether to use AES-256-GCM decryption
      * @return array The decoded input data array
      */
-    public static function post_rq(): array {
-        // Enforce strict POST method requirement
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            (new ApiResponse(false, 'Method Not Allowed. Please use POST.'))->send(405);
-        }
-
+    public static function getBody(): array {
         // Check if encryption is required via query string parameter (e.g., ?is_enc=true)
         $isEncrypted = filter_var($_GET['is_enc'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
