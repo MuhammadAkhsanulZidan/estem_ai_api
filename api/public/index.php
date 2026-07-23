@@ -43,6 +43,7 @@ require_once $autoloadPath;
 use App\Core\Router;
 use App\Controllers\AuthController;
 use App\Controllers\AdminProtocolController;
+use App\Controllers\UserController;
 
 try {
     $router = new Router();
@@ -51,6 +52,11 @@ try {
     $router->post('/v1/admin-protocols', [AdminProtocolController::class, 'post']);
     $router->put('/v1/admin-protocols', [AdminProtocolController::class, 'put']);
     $router->delete('/v1/admin-protocols', [AdminProtocolController::class, 'delete']);
+
+    $router->get('/v1/users', [UserController::class, 'get']);
+    $router->post('/v1/users', [UserController::class, 'post']);
+    $router->put('/v1/users', [UserController::class, 'put']);
+    $router->delete('/v1/users', [UserController::class, 'delete']);
 
     // Parse path to remove query parameters
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
