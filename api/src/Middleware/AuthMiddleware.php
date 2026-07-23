@@ -39,16 +39,17 @@ class AuthMiddleware {
         try {
             // 2. Decode JWT
             $decoded = JWT::decode($jwt, new Key($secret, 'HS256'));
+            $decodedArray = json_decode(json_encode($decoded), true);
 
             // 3. Verify Role Authorization
-            if (!empty($allowedRoles) && !in_array($decoded->data->role_name ?? '', $allowedRoles, true)) {
+            if (!empty($allowedRoles) && !in_array($decodedArray['data']['role_name'] ?? '', $allowedRoles, true)) {
                 http_response_code(403); // Forbidden
                 echo json_encode(['error' => 'Forbidden: Insufficient privileges']);
                 exit();
             }
 
             // Return user data so controllers can use it
-            return (array) $decoded;
+            return $decodedArray;
 
         } catch (\Throwable $e) {
             http_response_code(401);
