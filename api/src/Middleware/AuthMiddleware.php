@@ -26,26 +26,35 @@ class AuthMiddleware {
 
         $jwt = $matches[1];
 
+        // Ensure environment variables are loaded
+        if (empty($_ENV['JWT_SECRET'])) {
+            if (file_exists(__DIR__ . '/../../.env')) {
+                $dotenv = \Dotenv\Dotenv::createImmutable(__DIR__ . '/../../');
+                $dotenv->safeLoad();
+            }
+        }
+
+        $secret = $_ENV['JWT_SECRET'] ?? '';
+
         try {
             // 2. Decode JWT
-            $decoded = JWT::decode($jwt, new Key($_ENV['JWT_SECRET'], 'HS256'));
-            return (array) $decoded;
+            $decoded = JWT::decode($jwt, new Key($secret, 'HS256'));
 
             // 3. Verify Role Authorization
-            if (!empty($allowedRoles) && !in_array($decoded->data->role_name, $allowedRoles, true)) {
+            if (!empty($allowedRoles) && !in_array($decoded->data->role_name ?? '', $allowedRoles, true)) {
                 http_response_code(403); // Forbidden
                 echo json_encode(['error' => 'Forbidden: Insufficient privileges']);
                 exit();
             }
 
-            // Return user data so controllers can use $user->sub or $user->role
+            // Return user data so controllers can use it
             return (array) $decoded;
 
         } catch (\Throwable $e) {
             http_response_code(401);
             echo json_encode([
                 'error' => 'Unauthorized: Invalid or expired token',
-                'data'=>$decoded
+                'message' => $e->getMessage()
             ]);
             exit();
         }
