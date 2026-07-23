@@ -2,17 +2,41 @@
 
 /**
  * SQL Schema to REST API Controller Generator
- * Usage: php generate_controller.php <path_to_sql_file>
+ * Usage: php generate_controller.php <table_name_or_sql_path>
  */
 
 if ($argc < 2) {
-    echo "Usage: php generate_controller.php <path_to_sql_file>\n";
+    echo "Usage: php generate_controller.php <table_name_or_sql_path>\n";
     exit(1);
 }
 
-$sqlFile = $argv[1];
-if (!file_exists($sqlFile)) {
-    echo "Error: File not found at '{$sqlFile}'\n";
+$sqlArg = $argv[1];
+// Strip .sql extension if present to standardize
+$sqlName = preg_replace('/\.sql$/i', '', $sqlArg);
+
+// Search paths for the SQL file
+$searchPaths = [
+    __DIR__ . '/../../sql/tables/' . $sqlName . '.sql',
+    __DIR__ . '/../../sql/' . $sqlName . '.sql',
+    __DIR__ . '/../sql/tables/' . $sqlName . '.sql',
+    __DIR__ . '/../sql/' . $sqlName . '.sql',
+    $sqlArg // fallback to exact path passed
+];
+
+$sqlFile = null;
+foreach ($searchPaths as $path) {
+    if (file_exists($path)) {
+        $sqlFile = $path;
+        break;
+    }
+}
+
+if (!$sqlFile) {
+    echo "Error: SQL file for '{$sqlArg}' not found.\n";
+    echo "Searched in:\n";
+    foreach ($searchPaths as $path) {
+        echo "  - {$path}\n";
+    }
     exit(1);
 }
 
@@ -20,7 +44,7 @@ $sqlContent = file_get_contents($sqlFile);
 
 // Parse table name
 if (!preg_match('/CREATE\s+TABLE\s+([a-zA-Z0-9_]+)/i', $sqlContent, $tableMatch)) {
-    echo "Error: Could not parse CREATE TABLE name.\n";
+    echo "Error: Could not parse CREATE TABLE name from '{$sqlFile}'.\n";
     exit(1);
 }
 
@@ -29,7 +53,6 @@ $className = str_replace(' ', '', ucwords(str_replace('_', ' ', rtrim($tableName
 $controllerName = $className . 'Controller';
 
 // Parse column definitions
-// Simple line-by-line parsing of columns inside CREATE TABLE (...)
 preg_match('/CREATE\s+TABLE\s+[a-zA-Z0-9_]+\s*\((.*)\)/is', $sqlContent, $bodyMatch);
 if (empty($bodyMatch[1])) {
     echo "Error: Could not parse table body.\n";
@@ -55,11 +78,6 @@ foreach ($lines as $line) {
     $colName = trim($parts[0], '"` ');
     $colType = strtoupper($parts[1]);
     
-    // Ignore PRIMARY KEY declaration if separate or table-level constraints
-    if (str_contains(strtoupper($line), 'PRIMARY KEY') && $colName === 'id') {
-        // We know 'id' is standard primary key
-    }
-
     $isRequired = (str_contains(strtoupper($line), 'NOT NULL') && !str_contains(strtoupper($line), 'DEFAULT'));
     
     $columns[$colName] = [
@@ -117,26 +135,17 @@ $code .= "        try {\n";
 $code .= "            \$pdo = Database::getConnection();\n";
 $code .= "            \$data = RequestHelper::getBody();\n\n";
 
-// Filter validation
 $requiredFields = [];
-$validationChecks = [];
 foreach ($columns as $name => $meta) {
     if ($name === 'id' || $name === 'created_at' || $name === 'updated_at') {
         continue;
     }
-    
     if ($meta['required']) {
         $requiredFields[] = "'$name'";
-        if (str_contains($meta['type'], 'INT') || str_contains($meta['type'], 'NUMERIC')) {
-            $validationChecks[] = "!\$data['$name'] === null";
-        } else {
-            $validationChecks[] = "empty(trim(\$data['$name'] ?? ''))";
-        }
     }
 }
 
 if (!empty($requiredFields)) {
-    $fieldsList = implode(', ', $requiredFields);
     $code .= "            // Validate required fields\n";
     $code .= "            if (";
     $checks = [];
@@ -158,7 +167,6 @@ if (!empty($requiredFields)) {
     $code .= "            }\n\n";
 }
 
-// Prepare parameters
 $insertFields = [];
 $insertPlaceholders = [];
 foreach ($columns as $name => $meta) {
@@ -320,8 +328,8 @@ $code .= "    }\n";
 
 $code .= "}\n";
 
-// Write the file
-$targetPath = __DIR__ . "/src/Controllers/{$controllerName}.php";
+// Target path (relative to api/scripts/ -> api/src/Controllers/)
+$targetPath = __DIR__ . "/../src/Controllers/{$controllerName}.php";
 $dir = dirname($targetPath);
 if (!is_dir($dir)) {
     mkdir($dir, 0777, true);
