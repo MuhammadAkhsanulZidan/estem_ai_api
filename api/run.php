@@ -2,17 +2,20 @@
 
 if ($argc < 2) {
     echo "Usage: php run.php <script_name> [arguments...]\n";
-    echo "Example: php run.php generate_controller admin_protocols\n";
+    echo "Example: php run.php generate admin_protocols\n";
     exit(1);
 }
 
 $scriptArg = $argv[1];
 
-// Resolve the script file, searching both root directory and scripts directory
+// Resolve the script file, searching both root directory and script/scripts directories
 $searchPaths = [
     __DIR__ . '/' . $scriptArg,
     __DIR__ . '/' . $scriptArg . '.php',
     __DIR__ . '/' . preg_replace('/\.php$/i', '', $scriptArg) . '_controller.php',
+    __DIR__ . '/script/' . $scriptArg,
+    __DIR__ . '/script/' . $scriptArg . '.php',
+    __DIR__ . '/script/' . preg_replace('/\.php$/i', '', $scriptArg) . '_controller.php',
     __DIR__ . '/scripts/' . $scriptArg,
     __DIR__ . '/scripts/' . $scriptArg . '.php',
     __DIR__ . '/scripts/' . preg_replace('/\.php$/i', '', $scriptArg) . '_controller.php',
@@ -27,7 +30,7 @@ foreach ($searchPaths as $path) {
 }
 
 if (!$scriptPath) {
-    echo "Error: Script matching '{$scriptArg}' not found in root or scripts directory.\n";
+    echo "Error: Script matching '{$scriptArg}' not found in root, script, or scripts directory.\n";
     exit(1);
 }
 
