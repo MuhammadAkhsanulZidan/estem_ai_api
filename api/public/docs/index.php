@@ -101,12 +101,12 @@ function generateOpenApiSpec(): array
 
         if (file_exists($controllerPath)) {
             $controllerContent = file_get_contents($controllerPath);
-            
+
             // Extract the specific method and its preceding DocComment
             $methodPattern = '/\/\*\*(.*?)\*\/\s*(?:public\s+)?function\s+' . $methodName . '\s*\(/s';
             if (preg_match($methodPattern, $controllerContent, $methodMatches)) {
                 $docComment = $methodMatches[1];
-                
+
                 // Extract description from DocComment
                 $lines = explode("\n", $docComment);
                 $cleanLines = [];
@@ -125,7 +125,7 @@ function generateOpenApiSpec(): array
             $bodyPattern = '/function\s+' . $methodName . '\s*\([^)]*\)\s*\{(.*)/s';
             if (preg_match($bodyPattern, $controllerContent, $bodyMatches)) {
                 $bodyRest = $bodyMatches[1];
-                
+
                 // Track opening/closing brackets to extract complete method body
                 $braces = 1;
                 $methodBody = '';
@@ -181,7 +181,7 @@ function generateOpenApiSpec(): array
         }
 
         $endpointSpec = [
-            'summary' => "{$controllerName} -> {$methodName}",
+            'summary' => "",
             'description' => $description,
             'tags' => [$controllerName],
             'responses' => [

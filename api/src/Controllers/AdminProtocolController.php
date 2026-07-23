@@ -91,6 +91,7 @@ class AdminProtocolController
         try {
             $pdo = Database::getConnection();
             $data = RequestHelper::getBody();
+            $user = AuthMiddleware::authorize(['admin']);
 
             $id = $_GET['id'] ?? $data['id'] ?? null;
             if ($id === null) {
@@ -112,8 +113,7 @@ class AdminProtocolController
             $indication = $data['indication'] ?? null;
             $protocolVersion = $data['protocol_version'] ?? null;
             $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
-            $updatedBy = $data['updated_by'] ?? null;
-
+            $updatedBy = $user['data']['id']
             $stmt = $pdo->prepare("
                 UPDATE admin_protocols
                 SET protocol_name = :protocol_name,
@@ -148,6 +148,7 @@ class AdminProtocolController
     public function delete()
     {
         try {
+            $user = AuthMiddleware::authorize(['admin']);
             $pdo = Database::getConnection();
             $id = $_GET['id'] ?? null;
 
