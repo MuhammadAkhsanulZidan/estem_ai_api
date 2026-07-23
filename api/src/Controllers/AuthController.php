@@ -25,10 +25,11 @@ class AuthController {
 
             // Fetch user from PostgreSQL using prepared statements
             $stmt = $pdo->prepare("
-                SELECT id, username, role_id, password_hash
-                FROM users
+                SELECT id, username, role_id, r.role_name, password_hash
+                FROM users AS u
+                LEFT JOIN roles AS r ON u.role_id = r.role_id
                 WHERE username = :username
-                AND role_id = :role_id
+                AND u.role_id = :role_id
             ");
 
             $stmt->execute(['username' => $username, 'role_id' => $roleId]);
@@ -37,7 +38,7 @@ class AuthController {
             // Verify user exists and check password hash securely
             if ($user && password_verify($password, $user['password_hash'])) {
                 $issuedAt = time();
-                $expirationTime = $issuedAt + 3600; // Token valid for 1 hour
+                $expirationTime = $issuedAt + (3600*24); // Token valid for 1 day
                 $secretKey = $_ENV['JWT_SECRET'] ?? '';
 
                 $payload = [
@@ -46,6 +47,7 @@ class AuthController {
                     'data' => [
                         'id' => $user['id'],
                         'username' => $user['username']
+                        'role_name'=> $user['role_name'],
                     ]
                 ];
 
@@ -53,11 +55,11 @@ class AuthController {
                 $jwt = JWT::encode($payload, $secretKey, 'HS256');
 
                 $responseData = [
-                    'token' => $jwt,
-                    'expires_in' => 3600,
-                    'user' => [
+                    'token' => $jwt
+                    'data' => [
                         'id' => $user['id'],
                         'username' => $user['username']
+                        'role_name'=> $user['role_name'],
                     ]
                 ];
 
