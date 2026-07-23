@@ -73,7 +73,19 @@ function generateOpenApiSpec(): array
         'servers' => [
             ['url' => '..', 'description' => 'API Base URL']
         ],
-        'paths' => []
+        'paths' => [],
+        'components' => [
+            'securitySchemes' => [
+                'bearerAuth' => [
+                    'type' => 'http',
+                    'scheme' => 'bearer',
+                    'bearerFormat' => 'JWT'
+                ]
+            ]
+        ],
+        'security' => [
+            ['bearerAuth' => []]
+        ]
     ];
 
     $indexPath = __DIR__ . '/../index.php';
