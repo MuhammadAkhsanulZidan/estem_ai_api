@@ -29,9 +29,10 @@ class AuthMiddleware {
         try {
             // 2. Decode JWT
             $decoded = JWT::decode($jwt, new Key($_ENV['JWT_SECRET'], 'HS256'));
+            return (array) $decoded;
 
             // 3. Verify Role Authorization
-            if (!empty($allowedRoles) && !in_array($decoded->role_name, $allowedRoles, true)) {
+            if (!empty($allowedRoles) && !in_array($decoded->data->role_name, $allowedRoles, true)) {
                 http_response_code(403); // Forbidden
                 echo json_encode(['error' => 'Forbidden: Insufficient privileges']);
                 exit();
@@ -42,7 +43,10 @@ class AuthMiddleware {
 
         } catch (\Throwable $e) {
             http_response_code(401);
-            echo json_encode(['error' => 'Unauthorized: Invalid or expired token']);
+            echo json_encode([
+                'error' => 'Unauthorized: Invalid or expired token',
+                'data'=>$decoded
+            ]);
             exit();
         }
     }

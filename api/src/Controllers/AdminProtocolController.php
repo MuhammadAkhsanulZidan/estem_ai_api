@@ -3,8 +3,10 @@
 namespace App\Controllers;
 
 use App\Config\Database;
+use App\Middleware\AuthMiddleware;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+
 use PDO;
 
 class AdminProtocolController
@@ -57,7 +59,7 @@ class AdminProtocolController
 
             $indication = $data['indication'] ?? null;
             $protocolVersion = $data['protocol_version'] ?? null;
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
+            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : false;
             $createdBy = $user['data']['id'];
 
             $stmt = $pdo->prepare("

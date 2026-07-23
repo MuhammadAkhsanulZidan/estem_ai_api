@@ -25,9 +25,9 @@ class AuthController {
 
             // Fetch user from PostgreSQL using prepared statements
             $stmt = $pdo->prepare("
-                SELECT id, username, role_id, r.role_name, password_hash
+                SELECT u.id, u.username, u.role_id, r.name as role_name, u.password_hash
                 FROM users AS u
-                LEFT JOIN roles AS r ON u.role_id = r.role_id
+                LEFT JOIN roles AS r ON u.role_id = r.id
                 WHERE username = :username
                 AND u.role_id = :role_id
             ");
@@ -46,8 +46,8 @@ class AuthController {
                     'exp' => $expirationTime,
                     'data' => [
                         'id' => $user['id'],
-                        'username' => $user['username']
-                        'role_name'=> $user['role_name'],
+                        'username' => $user['username'],
+                        'role_name'=> $user['role_name']
                     ]
                 ];
 
@@ -55,11 +55,11 @@ class AuthController {
                 $jwt = JWT::encode($payload, $secretKey, 'HS256');
 
                 $responseData = [
-                    'token' => $jwt
+                    'token' => $jwt,
                     'data' => [
                         'id' => $user['id'],
-                        'username' => $user['username']
-                        'role_name'=> $user['role_name'],
+                        'username' => $user['username'],
+                        'role_name'=> $user['role_name']
                     ]
                 ];
 
