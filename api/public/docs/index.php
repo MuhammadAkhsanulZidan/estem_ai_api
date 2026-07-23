@@ -151,14 +151,35 @@ function generateOpenApiSpec(): array
                     }
                 }
 
+                // Extract error message validation strings from the method body
+                preg_match_all('/new ApiResponse\(\s*false\s*,\s*\'([^\'\n]+)\'\s*\)/i', $methodBody, $errorMsgMatches);
+                $errorMessagesStr = strtolower(implode(' ', $errorMsgMatches[1] ?? []));
+
+                // Helper closure to determine if a parameter is required
+                $isParamRequired = function (string $paramName) use ($methodBody, $errorMessagesStr): bool {
+                    // Check if parameter name is in an error string containing 'require' or 'missing'
+                    $cleanName = strtolower(str_replace('_', ' ', $paramName));
+                    if ((preg_match('/\b' . preg_quote($paramName, '/') . '\b/i', $errorMessagesStr) || str_contains($errorMessagesStr, $cleanName)) && 
+                        (str_contains($errorMessagesStr, 'require') || str_contains($errorMessagesStr, 'missing'))) {
+                        return true;
+                    }
+                    
+                    // Check if variable is checked for being null or empty
+                    if (preg_match('/(\bempty\(\s*\$' . preg_quote($paramName, '/') . '\s*\)|\$' . preg_quote($paramName, '/') . '\s*(===|==)\s*null)/i', $methodBody)) {
+                        return true;
+                    }
+                    return false;
+                };
+
                 // Detect $_GET parameters
                 preg_match_all('/\$_GET\\[\s*\'([a-zA-Z0-9_]+)\'\s*\\]/i', $methodBody, $getMatches);
                 if (!empty($getMatches[1])) {
                     foreach (array_unique($getMatches[1]) as $paramName) {
+                        $required = $isParamRequired($paramName);
                         $parameters[] = [
                             'name' => $paramName,
                             'in' => 'query',
-                            'required' => ($paramName === 'id'), // Typically 'id' is required if queried
+                            'required' => $required,
                             'schema' => ['type' => ($paramName === 'id') ? 'integer' : 'string']
                         ];
                     }
@@ -168,18 +189,34 @@ function generateOpenApiSpec(): array
                 preg_match_all('/\s*[$]data\\[\s*\'([a-zA-Z0-9_]+)\'\s*\\]/i', $methodBody, $bodyPropMatches);
                 if (!empty($bodyPropMatches[1]) && in_array($httpMethod, ['post', 'put', 'patch'])) {
                     $properties = [];
+                    $requiredFields = [];
                     foreach (array_unique($bodyPropMatches[1]) as $propName) {
+                        // Skip 'id' in body properties if it's already a query param (e.g. $_GET['id'] ?? $data['id'])
+                        if ($propName === 'id' && in_array('id', array_unique($getMatches[1] ?? []))) {
+                            continue;
+                        }
+                        
                         $properties[$propName] = [
                             'type' => (strpos(strtolower($propName), 'id') !== false) ? 'integer' : 'string'
                         ];
+
+                        if ($isParamRequired($propName)) {
+                            $requiredFields[] = $propName;
+                        }
                     }
+                    
+                    $schema = [
+                        'type' => 'object',
+                        'properties' => $properties
+                    ];
+                    if (!empty($requiredFields)) {
+                        $schema['required'] = $requiredFields;
+                    }
+
                     $requestBody = [
                         'content' => [
                             'application/json' => [
-                                'schema' => [
-                                    'type' => 'object',
-                                    'properties' => $properties
-                                ]
+                                'schema' => $schema
                             ]
                         ]
                     ];
