@@ -44,6 +44,8 @@ class AdminProtocolController
      */
     public function post()
     {
+        $user = AuthMiddleware::authorize(['admin']);
+
         try {
             $pdo = Database::getConnection();
             $data = RequestHelper::getBody();
@@ -56,7 +58,7 @@ class AdminProtocolController
             $indication = $data['indication'] ?? null;
             $protocolVersion = $data['protocol_version'] ?? null;
             $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
-            $createdBy = $data['create_by'] ?? null;
+            $createdBy = $user['data']['id'];
 
             $stmt = $pdo->prepare("
                 INSERT INTO admin_protocols (protocol_name, indication, protocol_version, is_active, create_by, created_at, updated_at)
