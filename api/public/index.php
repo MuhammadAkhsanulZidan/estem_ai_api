@@ -45,6 +45,8 @@ use App\Controllers\AuthController;
 use App\Controllers\AdminProtocolController;
 use App\Controllers\UserController;
 use App\Controllers\AffiliatorProtocolController;
+use App\Controllers\EcrfSectionController;
+use App\Controllers\AdminProtocolDocumentController;
 
 try {
     $router = new Router();
@@ -66,7 +68,17 @@ try {
     $router->put('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'put']);
     $router->delete('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'delete']);
 
-    // Parse path to remove query parameters
+        $router->get('/v1/ecrf_sections', [EcrfSectionController::class, 'get']);
+    $router->post('/v1/ecrf_sections', [EcrfSectionController::class, 'post']);
+    $router->put('/v1/ecrf_sections', [EcrfSectionController::class, 'put']);
+    $router->delete('/v1/ecrf_sections', [EcrfSectionController::class, 'delete']);
+
+    $router->get('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'get']);
+    $router->post('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'post']);
+    $router->put('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'put']);
+    $router->delete('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'delete']);
+
+// Parse path to remove query parameters
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $router->dispatch($uri, $_SERVER['REQUEST_METHOD']);
 

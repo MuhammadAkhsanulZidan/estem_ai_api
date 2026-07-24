@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS admin_protocol_ecrfs (
+DROP TABLE IF EXISTS admin_protocol_ecrfs;
+
+CREATE TABLE admin_protocol_ecrfs (
     id SERIAL PRIMARY KEY,
     protocol_id INT NOT NULL REFERENCES admin_protocols(id) ON DELETE CASCADE,
     section_id INT NOT NULL REFERENCES ecrf_sections(id),
