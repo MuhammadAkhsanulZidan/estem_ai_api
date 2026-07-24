@@ -228,4 +228,115 @@ class AdminProtocolController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
+    /**
+     * Retrieve E-CRF templates for a protocol.
+     */
+    public function getEcrf()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $protocolId = $_GET['protocol_id'] ?? null;
+
+            if ($protocolId === null) {
+                (new ApiResponse(false, 'Protocol ID is required'))->send(400);
+            }
+
+            // Optional: get a specific section
+            $sectionId = $_GET['section_id'] ?? null;
+
+            if ($sectionId !== null) {
+                $stmt = $pdo->prepare("SELECT * FROM admin_protocol_ecrfs WHERE protocol_id = :protocol_id AND section_id = :section_id");
+                $stmt->execute([
+                    'protocol_id' => $protocolId,
+                    'section_id' => (int)$sectionId
+                ]);
+                $ecrf = $stmt->fetch();
+                $data = $ecrf ? json_decode($ecrf['questions_schema'], true) : [];
+                (new ApiResponse(true, 'E-CRF retrieved successfully', $data))->send(200);
+            } else {
+                // Return all sections grouped
+                $stmt = $pdo->prepare("SELECT * FROM admin_protocol_ecrfs WHERE protocol_id = :protocol_id");
+                $stmt->execute(['protocol_id' => $protocolId]);
+                $rows = $stmt->fetchAll();
+
+                $sections = [
+                    'persiapan' => [],
+                    'pelaksanaan' => [],
+                    'monitoring' => [],
+                    'evaluasi' => [],
+                ];
+
+                $sectionMap = [
+                    1 => 'persiapan',
+                    2 => 'pelaksanaan',
+                    3 => 'monitoring',
+                    4 => 'evaluasi'
+                ];
+
+                foreach ($rows as $row) {
+                    $secKey = $sectionMap[(int)$row['section_id']] ?? null;
+                    if ($secKey) {
+                        $sections[$secKey] = json_decode($row['questions_schema'], true) ?: [];
+                    }
+                }
+
+                (new ApiResponse(true, 'E-CRF templates retrieved successfully', $sections))->send(200);
+            }
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Save/Update E-CRF template for a protocol and section.
+     */
+    public function postEcrf()
+    {
+        $user = AuthMiddleware::authorize(['admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $protocolId = $data['protocol_id'] ?? null;
+            $sectionId = $data['section_id'] ?? null;
+            $questionsSchema = $data['questions_schema'] ?? [];
+
+            if ($protocolId === null || $sectionId === null) {
+                (new ApiResponse(false, 'Protocol ID and Section ID are required'))->send(400);
+            }
+
+            if (!in_array((int)$sectionId, [1, 2, 3, 4])) {
+                (new ApiResponse(false, 'Invalid Section ID. Must be 1, 2, 3, or 4'))->send(400);
+            }
+
+            $jsonSchema = json_encode($questionsSchema);
+            $userId = $user['data']['id'];
+
+            // PostgreSQL UPSERT (INSERT ... ON CONFLICT DO UPDATE)
+            $stmt = $pdo->prepare("
+                INSERT INTO admin_protocol_ecrfs (protocol_id, section_id, questions_schema, created_by, updated_by, created_at, updated_at)
+                VALUES (:protocol_id, :section_id, :questions_schema::jsonb, :user_id, :user_id, NOW(), NOW())
+                ON CONFLICT (protocol_id, section_id) 
+                DO UPDATE SET 
+                    questions_schema = EXCLUDED.questions_schema,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+                RETURNING *
+            ");
+
+            $stmt->bindValue(':protocol_id', $protocolId, PDO::PARAM_INT);
+            $stmt->bindValue(':section_id', $sectionId, PDO::PARAM_INT);
+            $stmt->bindValue(':questions_schema', $jsonSchema, PDO::PARAM_STR);
+            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+
+            $stmt->execute();
+            $result = $stmt->fetch();
+
+            (new ApiResponse(true, 'E-CRF saved successfully', $result))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }
