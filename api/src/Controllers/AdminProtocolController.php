@@ -160,7 +160,8 @@ class AdminProtocolController
                         $originalName = basename($files['name'][$i]);
                         $extension = pathinfo($originalName, PATHINFO_EXTENSION);
                         $filename = pathinfo($originalName, PATHINFO_FILENAME);
-                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
+                        $randomId = bin2hex(random_bytes(2));
+                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
                         $targetPath = $uploadDir . $sanitizedName;
 
                         if (!move_uploaded_file($tmpName, $targetPath)) {
@@ -270,7 +271,8 @@ class AdminProtocolController
                         $originalName = basename($files['name'][$i]);
                         $extension = pathinfo($originalName, PATHINFO_EXTENSION);
                         $filename = pathinfo($originalName, PATHINFO_FILENAME);
-                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
+                        $randomId = bin2hex(random_bytes(2));
+                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
                         $targetPath = $uploadDir . $sanitizedName;
 
                         if (!move_uploaded_file($tmpName, $targetPath)) {
