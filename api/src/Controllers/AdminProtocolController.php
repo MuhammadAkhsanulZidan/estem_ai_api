@@ -79,6 +79,12 @@ class AdminProtocolController
                 $stmt->execute();
                 $protocols = $stmt->fetchAll();
 
+                foreach ($protocols as &$protocol) {
+                    $docStmt = $pdo->prepare("SELECT id, document_path FROM admin_protocol_documents WHERE protocol_id = :protocol_id");
+                    $docStmt->execute(['protocol_id' => $protocol['id']]);
+                    $protocol['documents'] = $docStmt->fetchAll() ?: [];
+                }
+
                 $responseData = [
                     'items' => $protocols,
                     'total_items' => $totalItems,
@@ -292,6 +298,39 @@ class AdminProtocolController
                 }
             }
 
+            // Option B: Granular Deletion of documents
+            $keepDocIdsInput = $data['keep_document_ids'] ?? null;
+            if ($keepDocIdsInput !== null) {
+                // Handle JSON-encoded array or direct list
+                $keepDocIds = [];
+                if (is_array($keepDocIdsInput)) {
+                    $keepDocIds = array_map('intval', $keepDocIdsInput);
+                } elseif (is_string($keepDocIdsInput)) {
+                    $decoded = json_decode($keepDocIdsInput, true);
+                    if (is_array($decoded)) {
+                        $keepDocIds = array_map('intval', $decoded);
+                    }
+                }
+
+                $docStmt = $pdo->prepare("SELECT id, document_path FROM admin_protocol_documents WHERE protocol_id = :protocol_id");
+                $docStmt->execute(['protocol_id' => $id]);
+                $currentDocs = $docStmt->fetchAll();
+
+                $publicDir = __DIR__ . '/../../public/';
+                foreach ($currentDocs as $doc) {
+                    $docId = (int)$doc['id'];
+                    if (!in_array($docId, $keepDocIds)) {
+                        $absPath = realpath($publicDir . $doc['document_path']);
+                        if ($absPath && file_exists($absPath) && is_file($absPath)) {
+                            unlink($absPath);
+                        }
+                        
+                        $delStmt = $pdo->prepare("DELETE FROM admin_protocol_documents WHERE id = :id");
+                        $delStmt->execute(['id' => $docId]);
+                    }
+                }
+            }
+
             (new ApiResponse(true, 'Protocol updated successfully', $updatedProtocol))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
@@ -322,6 +361,19 @@ class AdminProtocolController
             $stmt->execute(['id' => $id]);
             if (!$stmt->fetch()) {
                 (new ApiResponse(false, 'Protocol not found'))->send(404);
+            }
+
+            // Retrieve documents first to delete physical files
+            $docStmt = $pdo->prepare("SELECT document_path FROM admin_protocol_documents WHERE protocol_id = :id");
+            $docStmt->execute(['id' => $id]);
+            $docs = $docStmt->fetchAll();
+
+            $publicDir = __DIR__ . '/../../public/';
+            foreach ($docs as $doc) {
+                $absPath = realpath($publicDir . $doc['document_path']);
+                if ($absPath && file_exists($absPath) && is_file($absPath)) {
+                    unlink($absPath);
+                }
             }
 
             $stmt = $pdo->prepare("DELETE FROM admin_protocols WHERE id = :id");
