@@ -31,9 +31,25 @@ class AdminProtocolController
 
                 (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
             } else {
-                $stmt = $pdo->query("SELECT * FROM admin_protocols ORDER BY id DESC");
-                $protocols = $stmt->fetchAll();
+                $filterField = $_GET['filter_field'] ?? null;
+                $filterValue = $_GET['filter_value'] ?? null;
+                $allowedFields = ['protocol_name', 'indication', 'protocol_version', 'is_active'];
 
+                if ($filterField !== null && $filterValue !== null && in_array($filterField, $allowedFields)) {
+                    if ($filterField === 'is_active') {
+                        $val = filter_var($filterValue, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+                        $stmt = $pdo->prepare("SELECT * FROM admin_protocols WHERE is_active = :val ORDER BY id DESC");
+                        $stmt->bindValue(':val', $val, PDO::PARAM_INT);
+                    } else {
+                        $stmt = $pdo->prepare("SELECT * FROM admin_protocols WHERE {$filterField} ILIKE :val ORDER BY id DESC");
+                        $stmt->bindValue(':val', '%' . $filterValue . '%', PDO::PARAM_STR);
+                    }
+                    $stmt->execute();
+                } else {
+                    $stmt = $pdo->query("SELECT * FROM admin_protocols ORDER BY id DESC");
+                }
+                
+                $protocols = $stmt->fetchAll();
                 (new ApiResponse(true, 'Protocols retrieved successfully', $protocols))->send(200);
             }
         } catch (\Throwable $e) {
