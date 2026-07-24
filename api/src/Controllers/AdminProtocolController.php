@@ -255,12 +255,21 @@ class AdminProtocolController
                 $data = $ecrf ? json_decode($ecrf['questions_schema'], true) : [];
                 (new ApiResponse(true, 'E-CRF retrieved successfully', $data))->send(200);
             } else {
-                // Return all sections grouped
-                $stmt = $pdo->prepare("SELECT * FROM admin_protocol_ecrfs WHERE protocol_id = :protocol_id");
+                // Return all sections grouped using LEFT JOIN with ecrf_sections lookup table
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        es.id AS section_id,
+                        es.section_name,
+                        ape.questions_schema
+                    FROM ecrf_sections es
+                    LEFT JOIN admin_protocol_ecrfs ape 
+                        ON es.id = ape.section_id AND ape.protocol_id = :protocol_id
+                    ORDER BY es.id ASC
+                ");
                 $stmt->execute(['protocol_id' => $protocolId]);
                 $rows = $stmt->fetchAll();
 
-                $sections = [
+                $rawSections = [
                     'persiapan' => [],
                     'pelaksanaan' => [],
                     'monitoring' => [],
@@ -275,11 +284,37 @@ class AdminProtocolController
                 ];
 
                 foreach ($rows as $row) {
-                    $secKey = $sectionMap[(int)$row['section_id']] ?? null;
-                    if ($secKey) {
-                        $sections[$secKey] = json_decode($row['questions_schema'], true) ?: [];
-                    }
+                    $secId = (int)$row['section_id'];
+                    $secKey = $sectionMap[$secId] ?? ('section_' . $secId);
+                    $rawSections[$secKey] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
                 }
+
+                $persiapanCount = count($rawSections['persiapan']);
+                $pelaksanaanCount = count($rawSections['pelaksanaan']);
+                $monitoringCount = count($rawSections['monitoring']);
+
+                $isPelaksanaanLocked = ($persiapanCount === 0);
+                $isMonitoringLocked = $isPelaksanaanLocked || ($pelaksanaanCount === 0);
+                $isEvaluasiLocked = $isMonitoringLocked || ($monitoringCount === 0);
+
+                $sections = [
+                    'persiapan' => [
+                        'questions' => $rawSections['persiapan'],
+                        'is_locked' => false
+                    ],
+                    'pelaksanaan' => [
+                        'questions' => $rawSections['pelaksanaan'],
+                        'is_locked' => $isPelaksanaanLocked
+                    ],
+                    'monitoring' => [
+                        'questions' => $rawSections['monitoring'],
+                        'is_locked' => $isMonitoringLocked
+                    ],
+                    'evaluasi' => [
+                        'questions' => $rawSections['evaluasi'],
+                        'is_locked' => $isEvaluasiLocked
+                    ]
+                ];
 
                 (new ApiResponse(true, 'E-CRF templates retrieved successfully', $sections))->send(200);
             }
