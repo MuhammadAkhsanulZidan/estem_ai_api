@@ -53,6 +53,7 @@ try {
     $router->post('/v1/login', [AuthController::class, 'login']);
     $router->get('/v1/admin-protocols', [AdminProtocolController::class, 'get']);
     $router->post('/v1/admin-protocols', [AdminProtocolController::class, 'post']);
+    $router->post('/v1/admin-protocols/update', [AdminProtocolController::class, 'put']);
     $router->put('/v1/admin-protocols', [AdminProtocolController::class, 'put']);
     $router->delete('/v1/admin-protocols', [AdminProtocolController::class, 'delete']);
     $router->get('/v1/admin-protocols/ecrf', [AdminProtocolController::class, 'getEcrf']);

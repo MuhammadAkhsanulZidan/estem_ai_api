@@ -111,7 +111,7 @@ class AdminProtocolController
 
             $indication = $data['indication'] ?? null;
             $protocolVersion = $data['protocol_version'] ?? null;
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : false;
+            $isActive = isset($data['is_active']) ? filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN) : false;
             $createdBy = $user['data']['id'];
 
             $stmt = $pdo->prepare("
@@ -128,6 +128,40 @@ class AdminProtocolController
 
             $stmt->execute();
             $newProtocol = $stmt->fetch();
+
+            // Save uploaded documents
+            if (!empty($_FILES['documents'])) {
+                $uploadDir = __DIR__ . '/../../public/bck/administrator/protocols/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0777, true);
+                }
+
+                $files = $_FILES['documents'];
+                if (is_array($files['name'])) {
+                    for ($i = 0; $i < count($files['name']); $i++) {
+                        if ($files['error'][$i] === UPLOAD_ERR_OK) {
+                            $tmpName = $files['tmp_name'][$i];
+                            $originalName = basename($files['name'][$i]);
+                            $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                            $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                            $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
+                            $targetPath = $uploadDir . $sanitizedName;
+
+                            if (move_uploaded_file($tmpName, $targetPath)) {
+                                $dbPath = 'public/bck/administrator/protocols/' . $sanitizedName;
+                                $docStmt = $pdo->prepare("
+                                    INSERT INTO admin_protocol_documents (protocol_id, document_path)
+                                    VALUES (:protocol_id, :document_path)
+                                ");
+                                $docStmt->execute([
+                                    'protocol_id' => $newProtocol['id'],
+                                    'document_path' => $dbPath
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
 
             (new ApiResponse(true, 'Protocol created successfully', $newProtocol))->send(201);
         } catch (\Throwable $e) {
@@ -164,7 +198,7 @@ class AdminProtocolController
 
             $indication = $data['indication'] ?? null;
             $protocolVersion = $data['protocol_version'] ?? null;
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
+            $isActive = isset($data['is_active']) ? filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN) : true;
             $updatedBy = $user['data']['id'];
             $stmt = $pdo->prepare("
                 UPDATE admin_protocols
@@ -187,6 +221,40 @@ class AdminProtocolController
 
             $stmt->execute();
             $updatedProtocol = $stmt->fetch();
+
+            // Save uploaded documents
+            if (!empty($_FILES['documents'])) {
+                $uploadDir = __DIR__ . '/../../public/bck/administrator/protocols/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0777, true);
+                }
+
+                $files = $_FILES['documents'];
+                if (is_array($files['name'])) {
+                    for ($i = 0; $i < count($files['name']); $i++) {
+                        if ($files['error'][$i] === UPLOAD_ERR_OK) {
+                            $tmpName = $files['tmp_name'][$i];
+                            $originalName = basename($files['name'][$i]);
+                            $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                            $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                            $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
+                            $targetPath = $uploadDir . $sanitizedName;
+
+                            if (move_uploaded_file($tmpName, $targetPath)) {
+                                $dbPath = 'public/bck/administrator/protocols/' . $sanitizedName;
+                                $docStmt = $pdo->prepare("
+                                    INSERT INTO admin_protocol_documents (protocol_id, document_path)
+                                    VALUES (:protocol_id, :document_path)
+                                ");
+                                $docStmt->execute([
+                                    'protocol_id' => $id,
+                                    'document_path' => $dbPath
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
 
             (new ApiResponse(true, 'Protocol updated successfully', $updatedProtocol))->send(200);
         } catch (\Throwable $e) {

@@ -12,9 +12,12 @@ class RequestHelper {
      * @return array The decoded input data array
      */
     public static function getBody(): array {
-        // Check if encryption is required via query string parameter (e.g., ?is_enc=true)
-        $isEncrypted = filter_var($_GET['is_enc'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+        if (strpos($contentType, 'multipart/form-data') !== false) {
+            return $_POST;
+        }
 
+        $isEncrypted = filter_var($_GET['is_enc'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $rawInput = file_get_contents('php://input');
 
         if ($isEncrypted) {
