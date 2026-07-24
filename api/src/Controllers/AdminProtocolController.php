@@ -33,24 +33,60 @@ class AdminProtocolController
             } else {
                 $filterField = $_GET['filter_field'] ?? null;
                 $filterValue = $_GET['filter_value'] ?? null;
+                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : null;
+                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : null;
                 $allowedFields = ['protocol_name', 'indication', 'protocol_version', 'is_active'];
+
+                $where = '';
+                $params = [];
 
                 if ($filterField !== null && $filterValue !== null && in_array($filterField, $allowedFields)) {
                     if ($filterField === 'is_active') {
                         $val = filter_var($filterValue, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
-                        $stmt = $pdo->prepare("SELECT * FROM admin_protocols WHERE is_active = :val ORDER BY id DESC");
-                        $stmt->bindValue(':val', $val, PDO::PARAM_INT);
+                        $where = "WHERE is_active = :val";
+                        $params['val'] = $val;
                     } else {
-                        $stmt = $pdo->prepare("SELECT * FROM admin_protocols WHERE {$filterField} ILIKE :val ORDER BY id DESC");
-                        $stmt->bindValue(':val', '%' . $filterValue . '%', PDO::PARAM_STR);
+                        $where = "WHERE {$filterField} ILIKE :val";
+                        $params['val'] = '%' . $filterValue . '%';
                     }
-                    $stmt->execute();
-                } else {
-                    $stmt = $pdo->query("SELECT * FROM admin_protocols ORDER BY id DESC");
                 }
-                
+
+                // 1. Get total items count
+                $countQuery = "SELECT COUNT(*) FROM admin_protocols $where";
+                $stmt = $pdo->prepare($countQuery);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                $stmt->execute();
+                $totalItems = (int)$stmt->fetchColumn();
+
+                // 2. Get paginated results
+                $query = "SELECT * FROM admin_protocols $where ORDER BY id DESC";
+                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
+                if ($useLimit) {
+                    $offset = ($pageNo - 1) * $pageRow;
+                    $query .= " LIMIT :limit OFFSET :offset";
+                }
+
+                $stmt = $pdo->prepare($query);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                if ($useLimit) {
+                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+                }
+                $stmt->execute();
                 $protocols = $stmt->fetchAll();
-                (new ApiResponse(true, 'Protocols retrieved successfully', $protocols))->send(200);
+
+                $responseData = [
+                    'items' => $protocols,
+                    'total_items' => $totalItems,
+                    'page_no' => $pageNo ?? 1,
+                    'page_row' => $pageRow ?? $totalItems
+                ];
+
+                (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
             }
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
