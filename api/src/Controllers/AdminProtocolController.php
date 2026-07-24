@@ -130,35 +130,52 @@ class AdminProtocolController
             $newProtocol = $stmt->fetch();
 
             // Save uploaded documents
-            if (!empty($_FILES['documents'])) {
+            $files = $_FILES['documents'] ?? $_FILES['documents[]'] ?? null;
+            if ($files && !empty($files['name'][0])) {
                 $uploadDir = __DIR__ . '/../../public/bck/administrator/protocols/';
                 if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0777, true);
+                    if (!mkdir($uploadDir, 0777, true)) {
+                        throw new \Exception("Failed to create upload directory: " . $uploadDir);
+                    }
                 }
 
-                $files = $_FILES['documents'];
                 if (is_array($files['name'])) {
                     for ($i = 0; $i < count($files['name']); $i++) {
-                        if ($files['error'][$i] === UPLOAD_ERR_OK) {
-                            $tmpName = $files['tmp_name'][$i];
-                            $originalName = basename($files['name'][$i]);
-                            $extension = pathinfo($originalName, PATHINFO_EXTENSION);
-                            $filename = pathinfo($originalName, PATHINFO_FILENAME);
-                            $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
-                            $targetPath = $uploadDir . $sanitizedName;
-
-                            if (move_uploaded_file($tmpName, $targetPath)) {
-                                $dbPath = 'public/bck/administrator/protocols/' . $sanitizedName;
-                                $docStmt = $pdo->prepare("
-                                    INSERT INTO admin_protocol_documents (protocol_id, document_path)
-                                    VALUES (:protocol_id, :document_path)
-                                ");
-                                $docStmt->execute([
-                                    'protocol_id' => $newProtocol['id'],
-                                    'document_path' => $dbPath
-                                ]);
-                            }
+                        $errorCode = $files['error'][$i];
+                        if ($errorCode !== UPLOAD_ERR_OK) {
+                            $uploadErrors = [
+                                UPLOAD_ERR_INI_SIZE => 'The uploaded file exceeds the upload_max_filesize directive in php.ini.',
+                                UPLOAD_ERR_FORM_SIZE => 'The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.',
+                                UPLOAD_ERR_PARTIAL => 'The uploaded file was only partially uploaded.',
+                                UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
+                                UPLOAD_ERR_NO_TMP_DIR => 'Missing a temporary folder.',
+                                UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+                                UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.'
+                            ];
+                            $errMsg = $uploadErrors[$errorCode] ?? 'Unknown upload error.';
+                            throw new \Exception("File upload error for file '{$files['name'][$i]}': " . $errMsg);
                         }
+
+                        $tmpName = $files['tmp_name'][$i];
+                        $originalName = basename($files['name'][$i]);
+                        $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                        $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
+                        $targetPath = $uploadDir . $sanitizedName;
+
+                        if (!move_uploaded_file($tmpName, $targetPath)) {
+                            throw new \Exception("Failed to move uploaded file '{$originalName}' to '{$targetPath}'");
+                        }
+
+                        $dbPath = 'public/bck/administrator/protocols/' . $sanitizedName;
+                        $docStmt = $pdo->prepare("
+                            INSERT INTO admin_protocol_documents (protocol_id, document_path)
+                            VALUES (:protocol_id, :document_path)
+                        ");
+                        $docStmt->execute([
+                            'protocol_id' => $newProtocol['id'],
+                            'document_path' => $dbPath
+                        ]);
                     }
                 }
             }
@@ -223,35 +240,52 @@ class AdminProtocolController
             $updatedProtocol = $stmt->fetch();
 
             // Save uploaded documents
-            if (!empty($_FILES['documents'])) {
+            $files = $_FILES['documents'] ?? $_FILES['documents[]'] ?? null;
+            if ($files && !empty($files['name'][0])) {
                 $uploadDir = __DIR__ . '/../../public/bck/administrator/protocols/';
                 if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0777, true);
+                    if (!mkdir($uploadDir, 0777, true)) {
+                        throw new \Exception("Failed to create upload directory: " . $uploadDir);
+                    }
                 }
 
-                $files = $_FILES['documents'];
                 if (is_array($files['name'])) {
                     for ($i = 0; $i < count($files['name']); $i++) {
-                        if ($files['error'][$i] === UPLOAD_ERR_OK) {
-                            $tmpName = $files['tmp_name'][$i];
-                            $originalName = basename($files['name'][$i]);
-                            $extension = pathinfo($originalName, PATHINFO_EXTENSION);
-                            $filename = pathinfo($originalName, PATHINFO_FILENAME);
-                            $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
-                            $targetPath = $uploadDir . $sanitizedName;
-
-                            if (move_uploaded_file($tmpName, $targetPath)) {
-                                $dbPath = 'public/bck/administrator/protocols/' . $sanitizedName;
-                                $docStmt = $pdo->prepare("
-                                    INSERT INTO admin_protocol_documents (protocol_id, document_path)
-                                    VALUES (:protocol_id, :document_path)
-                                ");
-                                $docStmt->execute([
-                                    'protocol_id' => $id,
-                                    'document_path' => $dbPath
-                                ]);
-                            }
+                        $errorCode = $files['error'][$i];
+                        if ($errorCode !== UPLOAD_ERR_OK) {
+                            $uploadErrors = [
+                                UPLOAD_ERR_INI_SIZE => 'The uploaded file exceeds the upload_max_filesize directive in php.ini.',
+                                UPLOAD_ERR_FORM_SIZE => 'The uploaded file exceeds the MAX_FILE_SIZE directive that was specified in the HTML form.',
+                                UPLOAD_ERR_PARTIAL => 'The uploaded file was only partially uploaded.',
+                                UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
+                                UPLOAD_ERR_NO_TMP_DIR => 'Missing a temporary folder.',
+                                UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+                                UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.'
+                            ];
+                            $errMsg = $uploadErrors[$errorCode] ?? 'Unknown upload error.';
+                            throw new \Exception("File upload error for file '{$files['name'][$i]}': " . $errMsg);
                         }
+
+                        $tmpName = $files['tmp_name'][$i];
+                        $originalName = basename($files['name'][$i]);
+                        $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                        $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $i . '.' . $extension;
+                        $targetPath = $uploadDir . $sanitizedName;
+
+                        if (!move_uploaded_file($tmpName, $targetPath)) {
+                            throw new \Exception("Failed to move uploaded file '{$originalName}' to '{$targetPath}'");
+                        }
+
+                        $dbPath = 'public/bck/administrator/protocols/' . $sanitizedName;
+                        $docStmt = $pdo->prepare("
+                            INSERT INTO admin_protocol_documents (protocol_id, document_path)
+                            VALUES (:protocol_id, :document_path)
+                        ");
+                        $docStmt->execute([
+                            'protocol_id' => $id,
+                            'document_path' => $dbPath
+                        ]);
                     }
                 }
             }
