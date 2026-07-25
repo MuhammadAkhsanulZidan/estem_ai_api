@@ -31,9 +31,40 @@ class AffiliatorController
 
                 (new ApiResponse(true, 'Affiliator retrieved successfully', $affiliator))->send(200);
             } else {
-                $stmt = $pdo->query("
-                    SELECT * FROM affiliators ORDER BY id DESC
-                ");
+                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : null;
+                $filterField = $_GET['filter_field'] ?? null;
+                $filterValue = $_GET['filter_value'] ?? '';
+
+                $sql = "SELECT * FROM affiliators";
+                $conditions = [];
+                $params = [];
+
+                if ($filterField === 'name' && !empty($filterValue)) {
+                    $conditions[] = "affiliator_name ILIKE :filterValue";
+                    $params['filterValue'] = '%' . $filterValue . '%';
+                }
+
+                if (count($conditions) > 0) {
+                    $sql .= " WHERE " . implode(" AND ", $conditions);
+                }
+
+                $sql .= " ORDER BY id DESC";
+
+                if ($pageNo !== null) {
+                    $limit = 10;
+                    $offset = ($pageNo - 1) * $limit;
+                    if ($offset < 0) $offset = 0;
+                    
+                    // Postgres limit offset
+                    $sql .= " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
+                }
+
+                $stmt = $pdo->prepare($sql);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                }
+
+                $stmt->execute();
                 $affiliators = $stmt->fetchAll();
 
                 (new ApiResponse(true, 'Affiliators retrieved successfully', $affiliators))->send(200);

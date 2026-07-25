@@ -54,6 +54,7 @@ use App\Controllers\PatientEcrfController;
 try {
     $router = new Router();
     $router->post('/v1/login', [AuthController::class, 'login']);
+    $router->post('/v1/register', [UserController::class, 'register']);
     $router->get('/v1/admin-protocols', [AdminProtocolController::class, 'get']);
     $router->post('/v1/admin-protocols', [AdminProtocolController::class, 'post']);
     $router->post('/v1/admin-protocols/update', [AdminProtocolController::class, 'put']);

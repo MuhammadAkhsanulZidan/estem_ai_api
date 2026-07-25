@@ -214,4 +214,57 @@ class UserController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
+    /**
+     * Register a new user under an affiliator (defaults to is_active = false).
+     */
+    public function register()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $username = trim($data['username'] ?? '');
+            $email = trim($data['email'] ?? '');
+            $password = $data['password'] ?? '';
+            $affiliatorId = $data['affiliator_id'] ?? null;
+
+            if (empty($username) || empty($email) || empty($password) || $affiliatorId === null) {
+                (new ApiResponse(false, 'Username, email, password, and affiliator_id are required'))->send(400);
+            }
+
+            $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+            $roleId = 3; // Affiliator role
+            $levelId = 1; // Default level
+            $isActive = false; // Must be approved by admin
+
+            // Check if email already exists
+            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE email = :email");
+            $checkStmt->execute(['email' => $email]);
+            if ($checkStmt->fetch()) {
+                (new ApiResponse(false, 'Email already exists'))->send(400);
+            }
+
+            $stmt = $pdo->prepare("
+                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, is_active, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_active, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, affiliator_id, is_active, created_at, updated_at
+            ");
+
+            $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $stmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+            $stmt->bindValue(':level_id', $levelId, PDO::PARAM_INT);
+            $stmt->bindValue(':email', $email, PDO::PARAM_STR);
+            $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
+            $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
+            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+
+            $stmt->execute();
+            $newUser = $stmt->fetch();
+
+            (new ApiResponse(true, 'Registration successful, awaiting administrator approval', $newUser))->send(201);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }
