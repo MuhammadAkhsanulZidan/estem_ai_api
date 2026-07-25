@@ -5,7 +5,8 @@ namespace App\Controllers;
 use App\Config\Database;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
-use App\Constants\Role;
+use App\Constants\Role_Id;
+use App\Constants\Level_Id;
 
 use PDO;
 
@@ -39,18 +40,24 @@ class UserController
                 $filterValue = $_GET['filter_value'] ?? "";
                 $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
                 $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+                $isAffiliator = isset($_GET['is_affiliator']) ? (int)$_GET['is_affiliator'] : 0;
+
                 $allowedFields = ['username'];
 
-                $where = '';
+                $where = 'WHERE 1=1';
                 $conditions = [];
                 $params = [];
 
                 if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
-                    $where = "WHERE {$filterField} ILIKE :val";
+                    $where = "{$where} AND {$filterField} ILIKE :val";
                     $params['val'] = '%' . $filterValue . '%';
                 } else if($filterValue !== ""){
-                    $where = "WHERE username ILIKE :val";
+                    $where = "{$where} AND username ILIKE :val";
                     $params['val'] = '%' . $filterValue . '%';
+                }
+
+                if($isAffiliator == 1){
+                    $where = "{$where} AND affiliator_id IS NOT NULL";
                 }
 
                 // 1. Get total items count
@@ -63,7 +70,16 @@ class UserController
                 $totalItems = (int)$stmt->fetchColumn();
 
                 // 2. Get paginated results
-                $query = "SELECT * FROM users $where ORDER BY id DESC";
+                $query = "
+                    SELECT u.id, u.username, u.email, u.is_active,
+                    u.role_id, u.level_id,
+                    u.affiliator_id, a.affiliator_name, u.reviewer_id,
+                    u.created_at
+                    FROM users u
+                    LEFT JOIN affiliators a ON u.affiliator_id = a.id
+                    $where ORDER BY id DESC
+                ";
+
                 $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
                 if ($useLimit) {
                     $offset = ($pageNo - 1) * $pageRow;
@@ -83,7 +99,7 @@ class UserController
                 $users = $stmt->fetchAll();
 
                 $responseData = [
-                    'items' => $affiliators,
+                    'items' => $users,
                     'total_items' => $totalItems,
                     'page_no' => $pageNo ?? 1,
                     'page_row' => $pageRow ?? $totalItems
@@ -229,6 +245,49 @@ class UserController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+    /**
+     * Update an existing user.
+     */
+    public function approve_user()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $_GET['id'] ?? $data['id'] ?? null;
+            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : false;
+
+            if ($id === null) {
+                (new ApiResponse(false, 'User ID is required'))->send(400);
+            }
+
+            // Check if user exists
+            $stmt = $pdo->prepare("SELECT username FROM users WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            $existingUser = $stmt->fetch();
+            if (!$existingUser) {
+                (new ApiResponse(false, 'User not found'))->send(404);
+            }
+            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
+            $stmt = $pdo->prepare("
+                UPDATE users
+                SET is_active = :is_active,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at
+            ");
+
+            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+
+            $stmt->execute();
+            $updatedUser = $stmt->fetch();
+
+            (new ApiResponse(true, 'User updated successfully', $updatedUser))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 
     /**
      * Delete a user.
@@ -299,8 +358,8 @@ class UserController
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $stmt->bindValue(':role_id', $ROLE_ID_AFFILIATOR, PDO::PARAM_INT);
-            $stmt->bindValue(':level_id', $LEVEL_SYSUSER, PDO::PARAM_INT);
+            $stmt->bindValue(':role_id', ROLE_ID::AFFILIATOR, PDO::PARAM_INT);
+            $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT);
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
