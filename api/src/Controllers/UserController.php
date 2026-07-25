@@ -314,4 +314,59 @@ class UserController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
+    /**
+     * Register a new user as reviewer (defaults to is_active = false).
+     */
+    public function register_reviewer()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $username = trim($data['username'] ?? '');
+            $email = trim($data['email'] ?? '');
+            $password = $data['password'] ?? '';
+
+            if (empty($username) || empty($email) || empty($password)) {
+                (new ApiResponse(false, 'Username, email, and password are required'))->send(400);
+            }
+
+            $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+            $isActive = false; // Must be approved by admin
+
+            // Check if email already exists
+            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE email = :email");
+            $checkStmt->execute(['email' => $email]);
+            if ($checkStmt->fetch()) {
+                (new ApiResponse(false, 'Email already exists'))->send(400);
+            }
+
+            // Fetch role ID for reviewer dynamically
+            $roleStmt = $pdo->prepare("SELECT id FROM roles WHERE name ILIKE 'reviewer'");
+            $roleStmt->execute();
+            $role = $roleStmt->fetch();
+            $roleId = $role ? $role['id'] : 2;
+
+            $stmt = $pdo->prepare("
+                INSERT INTO users (username, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :is_active, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, is_active, created_at, updated_at
+            ");
+
+            $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $stmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
+            $stmt->bindValue(':level_id', 1, PDO::PARAM_INT); // Level 1 for standard user
+            $stmt->bindValue(':email', $email, PDO::PARAM_STR);
+            $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
+            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+
+            $stmt->execute();
+            $newUser = $stmt->fetch();
+
+            (new ApiResponse(true, 'Registration successful, awaiting administrator approval', $newUser))->send(201);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }

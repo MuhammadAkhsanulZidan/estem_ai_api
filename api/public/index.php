@@ -55,6 +55,7 @@ try {
     $router = new Router();
     $router->post('/v1/login', [AuthController::class, 'login']);
     $router->post('/v1/register-affiliator', [UserController::class, 'register_affiliator']);
+    $router->post('/v1/register-reviewer', [UserController::class, 'register_reviewer']);
     $router->get('/v1/admin-protocols', [AdminProtocolController::class, 'get']);
     $router->post('/v1/admin-protocols', [AdminProtocolController::class, 'post']);
     $router->post('/v1/admin-protocols/update', [AdminProtocolController::class, 'put']);
