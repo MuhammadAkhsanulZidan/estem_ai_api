@@ -31,43 +31,58 @@ class AffiliatorController
 
                 (new ApiResponse(true, 'Affiliator retrieved successfully', $affiliator))->send(200);
             } else {
-                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : null;
                 $filterField = $_GET['filter_field'] ?? null;
-                $filterValue = $_GET['filter_value'] ?? '';
+                $filterValue = $_GET['filter_value'] ?? null;
+                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : null;
+                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : null;
+                $allowedFields = ['affiliator_name'];
 
-                $sql = "SELECT * FROM affiliators";
+                $where = '';
                 $conditions = [];
                 $params = [];
 
-                if ($filterField === 'name' && !empty($filterValue)) {
-                    $conditions[] = "affiliator_name ILIKE :filterValue";
-                    $params['filterValue'] = '%' . $filterValue . '%';
+                if ($filterField !== null && $filterValue !== null && in_array($filterField, $allowedFields)) {
+                    $where = "WHERE {$filterField} ILIKE :val";
+                    $params['val'] = '%' . $filterValue . '%';
                 }
 
-                if (count($conditions) > 0) {
-                    $sql .= " WHERE " . implode(" AND ", $conditions);
-                }
-
-                $sql .= " ORDER BY id DESC";
-
-                if ($pageNo !== null) {
-                    $limit = 10;
-                    $offset = ($pageNo - 1) * $limit;
-                    if ($offset < 0) $offset = 0;
-                    
-                    // Postgres limit offset
-                    $sql .= " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
-                }
-
-                $stmt = $pdo->prepare($sql);
+                // 1. Get total items count
+                $countQuery = "SELECT COUNT(*) FROM affiliators $where";
+                $stmt = $pdo->prepare($countQuery);
                 foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                $stmt->execute();
+                $totalItems = (int)$stmt->fetchColumn();
+
+                // 2. Get paginated results
+                $query = "SELECT * FROM affiliators $where ORDER BY id DESC";
+                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
+                if ($useLimit) {
+                    $offset = ($pageNo - 1) * $pageRow;
+                    $query .= " LIMIT :limit OFFSET :offset";
+                }
+
+                $stmt = $pdo->prepare($query);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                if ($useLimit) {
+                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
                 }
 
                 $stmt->execute();
                 $affiliators = $stmt->fetchAll();
 
-                (new ApiResponse(true, 'Affiliators retrieved successfully', $affiliators))->send(200);
+                $responseData = [
+                    'items' => $affiliators,
+                    'total_items' => $totalItems,
+                    'page_no' => $pageNo ?? 1,
+                    'page_row' => $pageRow ?? $totalItems
+                ];
+
+                (new ApiResponse(true, 'Affiliators retrieved successfully', $responseData))->send(200);
             }
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
