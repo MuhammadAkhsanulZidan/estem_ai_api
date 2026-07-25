@@ -18,6 +18,8 @@ class AuthController {
             $roleId = $data['role_id'] ?? '';
             $password = $data['password'] ?? '';
 
+            $affiliatorId = $data['affiliator_id'] ?? null;
+
             // Basic payload validation
             if (empty($username) || empty($password) || empty($roleId)) {
                 (new ApiResponse(false, 'Username, password, and role are required'))->send(400);
@@ -25,7 +27,7 @@ class AuthController {
 
             // Fetch user from PostgreSQL using prepared statements
             $stmt = $pdo->prepare("
-                SELECT u.id, u.username, u.role_id, r.name as role_name, u.password_hash
+                SELECT u.id, u.username, u.role_id, r.name as role_name, u.password_hash, u.affiliator_id
                 FROM users AS u
                 LEFT JOIN roles AS r ON u.role_id = r.id
                 WHERE username = :username
@@ -38,6 +40,12 @@ class AuthController {
 
             // Verify user exists and check password hash securely
             if ($user && password_verify($password, $user['password_hash'])) {
+                // Check if role is affiliator (role_id = 3) and verify affiliator_id matches
+                if ((int)$roleId === 3) {
+                    if ($affiliatorId === null || (int)$user['affiliator_id'] !== (int)$affiliatorId) {
+                        (new ApiResponse(false, 'Institusi Jejaring asal tidak sesuai'))->send(400);
+                    }
+                }
                 $issuedAt = time();
                 $expirationTime = $issuedAt + (3600*24); // Token valid for 1 day
                 $secretKey = $_ENV['JWT_SECRET'] ?? '';
