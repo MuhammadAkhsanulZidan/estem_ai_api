@@ -89,6 +89,7 @@ try {
     $router->delete('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'delete']);
     $router->get('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'get']);
     $router->post('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'post']);
+    $router->delete('/v1/affiliator-supervisions/documents', [AffiliatorSupervisionController::class, 'deleteDocument']);
     $router->post('/v1/affiliator-supervisions/review', [AffiliatorSupervisionController::class, 'review']);
     $router->get('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'get']);
     $router->post('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'post']);

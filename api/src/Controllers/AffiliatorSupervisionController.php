@@ -23,11 +23,11 @@ class AffiliatorSupervisionController
 
             // 1. Resolve affiliator_id
             $affiliatorId = $_GET['affiliator_id'] ?? null;
-            if ($affiliatorId === null && in_array('affiliator', $user['data']['roles'] ?? [])) {
-                $affStmt = $pdo->prepare("SELECT id FROM affiliators WHERE create_by = :user_id");
+            if ($affiliatorId === null) {
+                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
                 $affStmt->execute(['user_id' => $userId]);
                 $affRow = $affStmt->fetch();
-                $affiliatorId = $affRow ? $affRow['id'] : null;
+                $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
             }
 
             if ($affiliatorId === null) {
@@ -46,15 +46,9 @@ class AffiliatorSupervisionController
                     $supervisions = $stmt->fetchAll();
 
                     foreach ($supervisions as &$sup) {
-                        $docStmt = $pdo->prepare("SELECT document_key, document_path FROM affiliator_supervision_documents WHERE supervision_id = :id");
+                        $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_supervision_documents WHERE supervision_id = :id ORDER BY id DESC");
                         $docStmt->execute(['id' => $sup['id']]);
-                        $docs = $docStmt->fetchAll();
-
-                        $documents = [];
-                        foreach ($docs as $doc) {
-                            $documents[$doc['document_key']] = $doc['document_path'];
-                        }
-                        $sup['documents'] = (object)$documents;
+                        $sup['documents'] = $docStmt->fetchAll();
                     }
 
                     (new ApiResponse(true, 'All supervisions retrieved', $supervisions))->send(200);
@@ -92,22 +86,15 @@ class AffiliatorSupervisionController
                     'hospital_name' => $aff ? $aff['affiliator_name'] : '',
                     'institution_type' => $aff ? $aff['affiliator_type'] : '',
                     'address' => $aff ? $aff['address'] : '',
-                    'documents' => new \stdClass()
+                    'documents' => []
                 ];
                 (new ApiResponse(true, 'No supervision progress found, returning profile defaults', $defaultData))->send(200);
             }
 
-            // 3. Fetch documents list
-            $docStmt = $pdo->prepare("SELECT document_key, document_path FROM affiliator_supervision_documents WHERE supervision_id = :supervision_id");
+            // 3. Fetch documents list as simple array of objects
+            $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_supervision_documents WHERE supervision_id = :supervision_id ORDER BY id DESC");
             $docStmt->execute(['supervision_id' => $supervision['id']]);
-            $docs = $docStmt->fetchAll();
-
-            $documents = [];
-            foreach ($docs as $doc) {
-                $documents[$doc['document_key']] = $doc['document_path'];
-            }
-
-            $supervision['documents'] = (object)$documents;
+            $supervision['documents'] = $docStmt->fetchAll();
 
             (new ApiResponse(true, 'Supervision details retrieved successfully', $supervision))->send(200);
         } catch (\Throwable $e) {
@@ -125,13 +112,13 @@ class AffiliatorSupervisionController
         try {
             $pdo = Database::getConnection();
             $userId = $user['data']['id'];
-            $data = RequestHelper::getBody();
+            $data = $_POST; // Read from $_POST directly as request carries multipart/form-data for uploads
 
             // 1. Resolve affiliator_id
-            $affStmt = $pdo->prepare("SELECT id FROM affiliators WHERE create_by = :user_id");
+            $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
             $affStmt->execute(['user_id' => $userId]);
             $affRow = $affStmt->fetch();
-            $affiliatorId = $affRow ? $affRow['id'] : null;
+            $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
 
             if ($affiliatorId === null) {
                 (new ApiResponse(false, 'Affiliator profile is not initialized yet.'))->send(400);
@@ -165,72 +152,87 @@ class AffiliatorSupervisionController
             $supervision = $stmt->fetch();
             $supervisionId = $supervision['id'];
 
-            // 3. Process File Uploads
+            // 3. Process File Uploads - Accept multiple documents dynamically
             $uploadDir = __DIR__ . '/../../public/bck/affiliator/supervisions/';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0777, true);
             }
 
-            $docKeys = ['suratPermohonan', 'profilInstitusi', 'izinInstitusi', 'skPenanggungJawab', 'sopPelayanan'];
-            $publicDir = __DIR__ . '/../../public/';
+            if (!empty($_FILES)) {
+                foreach ($_FILES as $key => $file) {
+                    if ($file['error'] === UPLOAD_ERR_OK) {
+                        $originalName = basename($file['name']);
+                        $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                        $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                        $randomId = bin2hex(random_bytes(2));
+                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
+                        $targetPath = $uploadDir . $sanitizedName;
 
-            foreach ($docKeys as $key) {
-                if (isset($_FILES[$key]) && $_FILES[$key]['error'] === UPLOAD_ERR_OK) {
-                    $file = $_FILES[$key];
-                    $originalName = basename($file['name']);
-                    $extension = pathinfo($originalName, PATHINFO_EXTENSION);
-                    $filename = pathinfo($originalName, PATHINFO_FILENAME);
-                    $randomId = bin2hex(random_bytes(2));
-                    $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
-                    $targetPath = $uploadDir . $sanitizedName;
+                        if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                            $dbPath = 'public/bck/affiliator/supervisions/' . $sanitizedName;
 
-                    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                        $dbPath = 'public/bck/affiliator/supervisions/' . $sanitizedName;
-
-                        // Delete previous physical file for this key if exists
-                        $prevStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_supervision_documents WHERE supervision_id = :supervision_id AND document_key = :document_key");
-                        $prevStmt->execute([
-                            'supervision_id' => $supervisionId,
-                            'document_key' => $key
-                        ]);
-                        $prevDoc = $prevStmt->fetch();
-
-                        if ($prevDoc) {
-                            $absPath = realpath($publicDir . $prevDoc['document_path']);
-                            if ($absPath && file_exists($absPath) && is_file($absPath)) {
-                                unlink($absPath);
-                            }
-                            // Delete DB record
-                            $delStmt = $pdo->prepare("DELETE FROM affiliator_supervision_documents WHERE id = :id");
-                            $delStmt->execute(['id' => $prevDoc['id']]);
+                            // Insert document record
+                            $insStmt = $pdo->prepare("
+                                INSERT INTO affiliator_supervision_documents (supervision_id, document_path)
+                                VALUES (:supervision_id, :document_path)
+                            ");
+                            $insStmt->execute([
+                                'supervision_id' => $supervisionId,
+                                'document_path' => $dbPath
+                            ]);
                         }
-
-                        // Insert new document record
-                        $insStmt = $pdo->prepare("
-                            INSERT INTO affiliator_supervision_documents (supervision_id, document_key, document_path)
-                            VALUES (:supervision_id, :document_key, :document_path)
-                        ");
-                        $insStmt->execute([
-                            'supervision_id' => $supervisionId,
-                            'document_key' => $key,
-                            'document_path' => $dbPath
-                        ]);
                     }
                 }
             }
 
             // 4. Retrieve all uploaded documents to return complete status
-            $docStmt = $pdo->prepare("SELECT document_key, document_path FROM affiliator_supervision_documents WHERE supervision_id = :supervision_id");
+            $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_supervision_documents WHERE supervision_id = :supervision_id ORDER BY id DESC");
             $docStmt->execute(['supervision_id' => $supervisionId]);
-            $docs = $docStmt->fetchAll();
-
-            $documents = [];
-            foreach ($docs as $doc) {
-                $documents[$doc['document_key']] = $doc['document_path'];
-            }
-            $supervision['documents'] = (object)$documents;
+            $supervision['documents'] = $docStmt->fetchAll();
 
             (new ApiResponse(true, 'Supervision registration saved successfully', $supervision))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Delete a supervision document.
+     */
+    public function deleteDocument()
+    {
+        AuthMiddleware::authorize(['affiliator']);
+
+        try {
+            $pdo = Database::getConnection();
+            $id = $_GET['id'] ?? null;
+
+            if ($id === null) {
+                $data = RequestHelper::getBody();
+                $id = $data['id'] ?? null;
+            }
+
+            if ($id === null) {
+                (new ApiResponse(false, 'ID is required'))->send(400);
+            }
+
+            // Check if document exists and get path to delete physically
+            $stmt = $pdo->prepare("SELECT document_path FROM affiliator_supervision_documents WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            $doc = $stmt->fetch();
+
+            if ($doc) {
+                $publicDir = __DIR__ . '/../../public/';
+                $absPath = realpath($publicDir . $doc['document_path']);
+                if ($absPath && file_exists($absPath) && is_file($absPath)) {
+                    unlink($absPath);
+                }
+                
+                $delStmt = $pdo->prepare("DELETE FROM affiliator_supervision_documents WHERE id = :id");
+                $delStmt->execute(['id' => $id]);
+            }
+
+            (new ApiResponse(true, 'Dokumen berhasil dihapus'))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
