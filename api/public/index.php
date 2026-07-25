@@ -44,6 +44,7 @@ use App\Core\Router;
 use App\Controllers\AuthController;
 use App\Controllers\AdminProtocolController;
 use App\Controllers\UserController;
+use App\Controllers\AffiliatorController;
 use App\Controllers\AffiliatorProtocolController;
 use App\Controllers\EcrfSectionController;
 use App\Controllers\AdminProtocolDocumentController;
@@ -65,6 +66,11 @@ try {
     $router->post('/v1/users', [UserController::class, 'post']);
     $router->put('/v1/users', [UserController::class, 'put']);
     $router->delete('/v1/users', [UserController::class, 'delete']);
+
+    $router->get('/v1/affiliators', [AffiliatorController::class, 'get']);
+    $router->post('/v1/affiliators', [AffiliatorController::class, 'post']);
+    $router->put('/v1/affiliators', [AffiliatorController::class, 'put']);
+    $router->delete('/v1/affiliators', [AffiliatorController::class, 'delete']);
 
     $router->get('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'get']);
     $router->post('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'post']);
