@@ -1,0 +1,10 @@
+<?php
+
+namespace App\Constants;
+
+$ROLE_ID_ADMIN = 1
+$ROLE_ID_AFFILIATOR = 2
+$ROLE_ID_REVIEWER = 3
+
+$LEVEL_SYSADMIN = 0
+$LEVEL_SYSUSER = 1

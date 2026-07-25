@@ -5,6 +5,8 @@ namespace App\Controllers;
 use App\Config\Database;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+use App\Constants\Role;
+
 use PDO;
 
 class UserController
@@ -20,8 +22,8 @@ class UserController
 
             if ($id !== null) {
                 $stmt = $pdo->prepare("
-                    SELECT id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at 
-                    FROM users 
+                    SELECT id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at
+                    FROM users
                     WHERE id = :id
                 ");
                 $stmt->execute(['id' => $id]);
@@ -33,14 +35,61 @@ class UserController
 
                 (new ApiResponse(true, 'User retrieved successfully', $user))->send(200);
             } else {
-                $stmt = $pdo->query("
-                    SELECT id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at 
-                    FROM users 
-                    ORDER BY id DESC
-                ");
+                $filterField = $_GET['filter_field'] ?? "";
+                $filterValue = $_GET['filter_value'] ?? "";
+                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+                $allowedFields = ['username'];
+
+                $where = '';
+                $conditions = [];
+                $params = [];
+
+                if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
+                    $where = "WHERE {$filterField} ILIKE :val";
+                    $params['val'] = '%' . $filterValue . '%';
+                } else if($filterValue !== ""){
+                    $where = "WHERE username ILIKE :val";
+                    $params['val'] = '%' . $filterValue . '%';
+                }
+
+                // 1. Get total items count
+                $countQuery = "SELECT COUNT(*) FROM users $where";
+                $stmt = $pdo->prepare($countQuery);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                $stmt->execute();
+                $totalItems = (int)$stmt->fetchColumn();
+
+                // 2. Get paginated results
+                $query = "SELECT * FROM users $where ORDER BY id DESC";
+                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
+                if ($useLimit) {
+                    $offset = ($pageNo - 1) * $pageRow;
+                    $query .= " LIMIT :limit OFFSET :offset";
+                }
+
+                $stmt = $pdo->prepare($query);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                if ($useLimit) {
+                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+                }
+
+                $stmt->execute();
                 $users = $stmt->fetchAll();
 
-                (new ApiResponse(true, 'Users retrieved successfully', $users))->send(200);
+                $responseData = [
+                    'items' => $affiliators,
+                    'total_items' => $totalItems,
+                    'page_no' => $pageNo ?? 1,
+                    'page_row' => $pageRow ?? $totalItems
+                ];
+
+                (new ApiResponse(true, 'Users retrieved successfully', $responseData))->send(200);
             }
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
@@ -218,7 +267,7 @@ class UserController
     /**
      * Register a new user under an affiliator (defaults to is_active = false).
      */
-    public function register()
+    public function register_affiliator()
     {
         try {
             $pdo = Database::getConnection();
@@ -234,8 +283,6 @@ class UserController
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
-            $roleId = 3; // Affiliator role
-            $levelId = 1; // Default level
             $isActive = false; // Must be approved by admin
 
             // Check if email already exists
@@ -252,8 +299,8 @@ class UserController
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $stmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
-            $stmt->bindValue(':level_id', $levelId, PDO::PARAM_INT);
+            $stmt->bindValue(':role_id', $ROLE_ID_AFFILIATOR, PDO::PARAM_INT);
+            $stmt->bindValue(':level_id', $LEVEL_SYSUSER, PDO::PARAM_INT);
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);

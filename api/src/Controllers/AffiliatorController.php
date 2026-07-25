@@ -31,18 +31,21 @@ class AffiliatorController
 
                 (new ApiResponse(true, 'Affiliator retrieved successfully', $affiliator))->send(200);
             } else {
-                $filterField = $_GET['filter_field'] ?? null;
-                $filterValue = $_GET['filter_value'] ?? null;
-                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : null;
-                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : null;
+                $filterField = $_GET['filter_field'] ?? "";
+                $filterValue = $_GET['filter_value'] ?? "";
+                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
                 $allowedFields = ['affiliator_name'];
 
                 $where = '';
                 $conditions = [];
                 $params = [];
 
-                if ($filterField !== null && $filterValue !== null && in_array($filterField, $allowedFields)) {
+                if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
                     $where = "WHERE {$filterField} ILIKE :val";
+                    $params['val'] = '%' . $filterValue . '%';
+                } else if($filterValue !== ""){
+                    $where = "WHERE affiliator_name ILIKE :val";
                     $params['val'] = '%' . $filterValue . '%';
                 }
 
