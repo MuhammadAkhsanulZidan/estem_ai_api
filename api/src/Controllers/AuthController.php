@@ -40,8 +40,8 @@ class AuthController {
 
             // Verify user exists and check password hash securely
             if ($user && password_verify($password, $user['password_hash'])) {
-                // Check if role is affiliator (role_id = 3) and verify affiliator_id matches
-                if ((int)$roleId === 3) {
+                // Check if role is affiliator (role_id = 2) and verify affiliator_id matches
+                if ((int)$roleId === 2) {
                     if ($affiliatorId === null || (int)$user['affiliator_id'] !== (int)$affiliatorId) {
                         (new ApiResponse(false, 'Institusi Jejaring asal tidak sesuai'))->send(400);
                     }
