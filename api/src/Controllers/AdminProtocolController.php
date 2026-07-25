@@ -502,6 +502,26 @@ class AdminProtocolController
                 (new ApiResponse(false, 'Invalid Section ID. Must be 1, 2, 3, or 4'))->send(400);
             }
 
+            // Backend UUID assignment
+            $activeUuids = [];
+            if (is_array($questionsSchema)) {
+                foreach ($questionsSchema as &$q) {
+                    $qId = $q['id'] ?? null;
+                    if (!is_string($qId) || strlen($qId) !== 36 || substr_count($qId, '-') !== 4) {
+                        $q['id'] = sprintf(
+                            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+                            mt_rand(0, 0xffff),
+                            mt_rand(0, 0x0fff) | 0x4000,
+                            mt_rand(0, 0x3fff) | 0x8000,
+                            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+                        );
+                    }
+                    $activeUuids[] = $q['id'];
+                }
+                unset($q);
+            }
+
             $jsonSchema = json_encode($questionsSchema);
             $userId = $user['data']['id'];
 
@@ -524,6 +544,29 @@ class AdminProtocolController
 
             $stmt->execute();
             $result = $stmt->fetch();
+
+            // Surgical cleanup of patient answers for deleted/changed questions
+            if (!empty($activeUuids)) {
+                $resStmt = $pdo->prepare("SELECT id, answers_data FROM patient_ecrf_responses WHERE protocol_id = :protocol_id AND section_id = :section_id");
+                $resStmt->execute(['protocol_id' => $protocolId, 'section_id' => $sectionId]);
+                $responses = $resStmt->fetchAll();
+
+                foreach ($responses as $res) {
+                    $answers = json_decode($res['answers_data'] ?? '{}', true) ?: [];
+                    $cleaned = [];
+                    foreach ($answers as $qId => $val) {
+                        if (in_array($qId, $activeUuids)) {
+                            $cleaned[$qId] = $val;
+                        }
+                    }
+                    
+                    $updStmt = $pdo->prepare("UPDATE patient_ecrf_responses SET answers_data = :answers_data::jsonb, updated_at = NOW() WHERE id = :id");
+                    $updStmt->execute([
+                        'answers_data' => json_encode($cleaned),
+                        'id' => $res['id']
+                    ]);
+                }
+            }
 
             (new ApiResponse(true, 'E-CRF saved successfully', $result))->send(200);
         } catch (\Throwable $e) {

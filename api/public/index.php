@@ -48,6 +48,7 @@ use App\Controllers\AffiliatorProtocolController;
 use App\Controllers\EcrfSectionController;
 use App\Controllers\AdminProtocolDocumentController;
 use App\Controllers\AffiliatorSupervisionController;
+use App\Controllers\PatientEcrfController;
 
 try {
     $router = new Router();
@@ -71,6 +72,9 @@ try {
     $router->delete('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'delete']);
     $router->get('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'get']);
     $router->post('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'post']);
+    $router->post('/v1/affiliator-supervisions/review', [AffiliatorSupervisionController::class, 'review']);
+    $router->get('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'get']);
+    $router->post('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'post']);
 
         $router->get('/v1/ecrf_sections', [EcrfSectionController::class, 'get']);
     $router->post('/v1/ecrf_sections', [EcrfSectionController::class, 'post']);

@@ -31,7 +31,36 @@ class AffiliatorSupervisionController
             }
 
             if ($affiliatorId === null) {
-                (new ApiResponse(true, 'No affiliator associated', null))->send(200);
+                if (in_array('admin', $user['data']['roles'] ?? [])) {
+                    // Fetch all supervisions for admin list
+                    $stmt = $pdo->query("
+                        SELECT 
+                            asup.*,
+                            aff.affiliator_name AS hospital_name,
+                            aff.affiliator_type AS institution_type,
+                            aff.address
+                        FROM affiliator_supervisions asup
+                        JOIN affiliators aff ON asup.affiliator_id = aff.id
+                        ORDER BY asup.id DESC
+                    ");
+                    $supervisions = $stmt->fetchAll();
+
+                    foreach ($supervisions as &$sup) {
+                        $docStmt = $pdo->prepare("SELECT document_key, document_path FROM affiliator_supervision_documents WHERE supervision_id = :id");
+                        $docStmt->execute(['id' => $sup['id']]);
+                        $docs = $docStmt->fetchAll();
+
+                        $documents = [];
+                        foreach ($docs as $doc) {
+                            $documents[$doc['document_key']] = $doc['document_path'];
+                        }
+                        $sup['documents'] = (object)$documents;
+                    }
+
+                    (new ApiResponse(true, 'All supervisions retrieved', $supervisions))->send(200);
+                } else {
+                    (new ApiResponse(true, 'No affiliator associated', null))->send(200);
+                }
             }
 
             // 2. Fetch supervision data joined with affiliator details
@@ -202,6 +231,61 @@ class AffiliatorSupervisionController
             $supervision['documents'] = (object)$documents;
 
             (new ApiResponse(true, 'Supervision registration saved successfully', $supervision))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Update supervision review status and notes by admin.
+     */
+    public function review()
+    {
+        $user = AuthMiddleware::authorize(['admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $data['id'] ?? null;
+            $status = trim($data['status'] ?? '');
+            $reviewNotes = trim($data['review_notes'] ?? '');
+
+            if ($id === null || empty($status)) {
+                (new ApiResponse(false, 'Supervision ID and Status are required'))->send(400);
+            }
+
+            if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
+                (new ApiResponse(false, 'Invalid status.'))->send(400);
+            }
+
+            $userId = $user['data']['id'];
+
+            $stmt = $pdo->prepare("
+                UPDATE affiliator_supervisions
+                SET status = :status,
+                    review_notes = :review_notes,
+                    approved_by = CASE WHEN :status = 'approved' OR :status = 'active' THEN :user_id ELSE approved_by END,
+                    approved_at = CASE WHEN :status = 'approved' OR :status = 'active' THEN NOW() ELSE approved_at END,
+                    updated_by = :user_id,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING *
+            ");
+            
+            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+
+            $stmt->execute();
+            $result = $stmt->fetch();
+
+            if (!$result) {
+                (new ApiResponse(false, 'Supervision registration record not found.'))->send(404);
+            }
+
+            (new ApiResponse(true, 'Supervision status updated successfully', $result))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
