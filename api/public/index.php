@@ -79,6 +79,7 @@ try {
 
     $router->get('/v1/affiliator/profile', [AffiliatorProfileController::class, 'get']);
     $router->put('/v1/affiliator/profile', [AffiliatorProfileController::class, 'put']);
+    $router->get('/v1/affiliator/profile/documents', [AffiliatorProfileController::class, 'getDocuments']);
     $router->post('/v1/affiliator/profile/documents', [AffiliatorProfileController::class, 'postDocument']);
     $router->delete('/v1/affiliator/profile/documents', [AffiliatorProfileController::class, 'deleteDocument']);
 

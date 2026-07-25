@@ -11,7 +11,20 @@ use PDO;
 class AffiliatorProfileController
 {
     /**
-     * Retrieve the logged-in user's affiliator profile and support documents.
+     * Helper: resolve affiliator_id from the logged-in user's JWT.
+     */
+    private function resolveAffiliatorId(array $user): ?int
+    {
+        $pdo = Database::getConnection();
+        $userId = $user['data']['id'] ?? null;
+        $stmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+        $stmt->execute(['id' => $userId]);
+        $row = $stmt->fetch();
+        return $row ? (int)$row['affiliator_id'] : null;
+    }
+
+    /**
+     * Retrieve the logged-in user's affiliator profile (without documents).
      */
     public function get()
     {
@@ -19,45 +32,28 @@ class AffiliatorProfileController
 
         try {
             $pdo = Database::getConnection();
-            $userId = $user['data']['id'] ?? null;
-
-            // Fetch the user's affiliator_id
-            $userStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
-            $userStmt->execute(['id' => $userId]);
-            $userData = $userStmt->fetch();
-            $affiliatorId = $userData ? $userData['affiliator_id'] : null;
+            $affiliatorId = $this->resolveAffiliatorId($user);
 
             if (!$affiliatorId) {
                 (new ApiResponse(false, 'Akun pengguna ini tidak terasosiasi dengan institusi jejaring manapun'))->send(400);
             }
 
-            // Fetch affiliator profile details
-            $profileStmt = $pdo->prepare("SELECT * FROM affiliators WHERE id = :id");
-            $profileStmt->execute(['id' => $affiliatorId]);
-            $profile = $profileStmt->fetch();
+            $stmt = $pdo->prepare("SELECT * FROM affiliators WHERE id = :id");
+            $stmt->execute(['id' => $affiliatorId]);
+            $profile = $stmt->fetch();
 
             if (!$profile) {
                 (new ApiResponse(false, 'Profil faskes tidak ditemukan'))->send(404);
             }
 
-            // Fetch associated documents
-            $docsStmt = $pdo->prepare("SELECT * FROM affiliator_profile_documents WHERE affiliator_id = :id ORDER BY id DESC");
-            $docsStmt->execute(['id' => $affiliatorId]);
-            $documents = $docsStmt->fetchAll();
-
-            $responseData = [
-                'profile' => $profile,
-                'documents' => $documents
-            ];
-
-            (new ApiResponse(true, 'Profil RS berhasil dimuat', $responseData))->send(200);
+            (new ApiResponse(true, 'Profil RS berhasil dimuat', $profile))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
 
     /**
-     * Update the logged-in user's affiliator profile details.
+     * Update only the fields present in the request body (dynamic SET).
      */
     public function put()
     {
@@ -67,62 +63,61 @@ class AffiliatorProfileController
             $pdo = Database::getConnection();
             $userId = $user['data']['id'] ?? null;
             $data = RequestHelper::getBody();
-
-            // Fetch the user's affiliator_id
-            $userStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
-            $userStmt->execute(['id' => $userId]);
-            $userData = $userStmt->fetch();
-            $affiliatorId = $userData ? $userData['affiliator_id'] : null;
+            $affiliatorId = $this->resolveAffiliatorId($user);
 
             if (!$affiliatorId) {
                 (new ApiResponse(false, 'Akun pengguna ini tidak terasosiasi dengan institusi jejaring manapun'))->send(400);
             }
 
-            // Perform direct column updates in the database
-            $stmt = $pdo->prepare("
-                UPDATE affiliators
-                SET affiliator_name = :name,
-                    affiliator_type = :type,
-                    address = :address,
-                    contact_phone = :phone,
-                    contact_email = :email,
-                    operational_number = :operational_number,
-                    director_name = :director_name,
-                    bed_number = :bed_number,
-                    icu_bed = :icu_bed,
-                    isolation_bed = :isolation_bed,
-                    policlinic = :policlinic,
-                    supporting_facility = :supporting_facility,
-                    specialist_number = :specialist_number,
-                    generalist_number = :generalist_number,
-                    nurse_number = :nurse_number,
-                    other_labor_number = :other_labor_number,
-                    research_head = :research_head,
-                    reasearch_head_contact = :reasearch_head_contact,
-                    updated_at = NOW(),
-                    updated_by = :userId
-                WHERE id = :id
-                RETURNING *
-            ");
+            // Map of allowed request keys to DB column names and their PDO types
+            $allowedFields = [
+                'affiliator_name'       => ['col' => 'affiliator_name',       'type' => PDO::PARAM_STR],
+                'affiliator_type'       => ['col' => 'affiliator_type',       'type' => PDO::PARAM_STR],
+                'address'               => ['col' => 'address',               'type' => PDO::PARAM_STR],
+                'contact_phone'         => ['col' => 'contact_phone',         'type' => PDO::PARAM_STR],
+                'contact_email'         => ['col' => 'contact_email',         'type' => PDO::PARAM_STR],
+                'operational_number'    => ['col' => 'operational_number',    'type' => PDO::PARAM_STR],
+                'director_name'         => ['col' => 'director_name',         'type' => PDO::PARAM_STR],
+                'bed_number'            => ['col' => 'bed_number',            'type' => PDO::PARAM_INT],
+                'icu_bed'               => ['col' => 'icu_bed',               'type' => PDO::PARAM_INT],
+                'isolation_bed'         => ['col' => 'isolation_bed',         'type' => PDO::PARAM_INT],
+                'policlinic'            => ['col' => 'policlinic',            'type' => PDO::PARAM_INT],
+                'supporting_facility'   => ['col' => 'supporting_facility',   'type' => PDO::PARAM_STR],
+                'specialist_number'     => ['col' => 'specialist_number',     'type' => PDO::PARAM_INT],
+                'generalist_number'     => ['col' => 'generalist_number',     'type' => PDO::PARAM_INT],
+                'nurse_number'          => ['col' => 'nurse_number',          'type' => PDO::PARAM_INT],
+                'other_labor_number'    => ['col' => 'other_labor_number',    'type' => PDO::PARAM_INT],
+                'research_head'         => ['col' => 'research_head',         'type' => PDO::PARAM_STR],
+                'reasearch_head_contact'=> ['col' => 'reasearch_head_contact','type' => PDO::PARAM_STR],
+            ];
 
-            $stmt->bindValue(':name', trim($data['affiliator_name'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':type', trim($data['affiliator_type'] ?? 'Rumah Sakit'), PDO::PARAM_STR);
-            $stmt->bindValue(':address', trim($data['address'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':phone', trim($data['contact_phone'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':email', trim($data['contact_email'] ?? ''), PDO::PARAM_STR);
-            $stmt->bindValue(':operational_number', $data['operational_number'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':director_name', $data['director_name'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':bed_number', isset($data['bed_number']) ? (int)$data['bed_number'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':icu_bed', isset($data['icu_bed']) ? (int)$data['icu_bed'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':isolation_bed', isset($data['isolation_bed']) ? (int)$data['isolation_bed'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':policlinic', isset($data['policlinic']) ? (int)$data['policlinic'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':supporting_facility', $data['supporting_facility'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':specialist_number', isset($data['specialist_number']) ? (int)$data['specialist_number'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':generalist_number', isset($data['generalist_number']) ? (int)$data['generalist_number'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':nurse_number', isset($data['nurse_number']) ? (int)$data['nurse_number'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':other_labor_number', isset($data['other_labor_number']) ? (int)$data['other_labor_number'] : null, PDO::PARAM_INT);
-            $stmt->bindValue(':research_head', $data['research_head'] ?? null, PDO::PARAM_STR);
-            $stmt->bindValue(':reasearch_head_contact', $data['reasearch_head_contact'] ?? null, PDO::PARAM_STR);
+            // Build dynamic SET clause from only the keys present in the request body
+            $setClauses = [];
+            $params = [];
+            foreach ($allowedFields as $key => $meta) {
+                if (array_key_exists($key, $data)) {
+                    $setClauses[] = "{$meta['col']} = :{$key}";
+                    $params[$key] = [
+                        'value' => $meta['type'] === PDO::PARAM_INT ? (int)$data[$key] : trim($data[$key] ?? ''),
+                        'type'  => $meta['type'],
+                    ];
+                }
+            }
+
+            if (empty($setClauses)) {
+                (new ApiResponse(false, 'No fields to update'))->send(400);
+            }
+
+            // Always update the audit columns
+            $setClauses[] = "updated_at = NOW()";
+            $setClauses[] = "updated_by = :userId";
+
+            $sql = "UPDATE affiliators SET " . implode(', ', $setClauses) . " WHERE id = :id RETURNING *";
+            $stmt = $pdo->prepare($sql);
+
+            foreach ($params as $key => $p) {
+                $stmt->bindValue(":{$key}", $p['value'], $p['type']);
+            }
             $stmt->bindValue(':userId', $userId, PDO::PARAM_INT);
             $stmt->bindValue(':id', $affiliatorId, PDO::PARAM_INT);
 
@@ -130,6 +125,31 @@ class AffiliatorProfileController
             $updatedProfile = $stmt->fetch();
 
             (new ApiResponse(true, 'Profil RS berhasil diperbarui', $updatedProfile))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Retrieve profile documents for the logged-in user's affiliator.
+     */
+    public function getDocuments()
+    {
+        $user = AuthMiddleware::authorize(['affiliator']);
+
+        try {
+            $pdo = Database::getConnection();
+            $affiliatorId = $this->resolveAffiliatorId($user);
+
+            if (!$affiliatorId) {
+                (new ApiResponse(false, 'Akun pengguna ini tidak terasosiasi dengan institusi jejaring manapun'))->send(400);
+            }
+
+            $stmt = $pdo->prepare("SELECT * FROM affiliator_profile_documents WHERE affiliator_id = :id ORDER BY id DESC");
+            $stmt->execute(['id' => $affiliatorId]);
+            $documents = $stmt->fetchAll();
+
+            (new ApiResponse(true, 'Dokumen berhasil dimuat', $documents))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -144,13 +164,8 @@ class AffiliatorProfileController
 
         try {
             $pdo = Database::getConnection();
-            $userId = $user['data']['id'] ?? null;
             $data = RequestHelper::getBody();
-
-            $userStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
-            $userStmt->execute(['id' => $userId]);
-            $userData = $userStmt->fetch();
-            $affiliatorId = $userData ? $userData['affiliator_id'] : null;
+            $affiliatorId = $this->resolveAffiliatorId($user);
 
             if (!$affiliatorId) {
                 (new ApiResponse(false, 'Akun pengguna ini tidak terasosiasi dengan institusi jejaring manapun'))->send(400);
