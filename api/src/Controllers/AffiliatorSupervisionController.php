@@ -15,7 +15,7 @@ class AffiliatorSupervisionController
      */
     public function get()
     {
-        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+        $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
 
         try {
             $pdo = Database::getConnection();
@@ -31,7 +31,7 @@ class AffiliatorSupervisionController
             }
 
             if ($affiliatorId === null) {
-                if ($user['data']['role_name'] == "admin") {
+                if ($user['data']['role_name'] == "admin" || $user['data']['role_name'] == "reviewer") {
                     // Fetch all supervisions for admin list
                     $stmt = $pdo->query("
                         SELECT
@@ -243,7 +243,7 @@ class AffiliatorSupervisionController
      */
      public function review()
      {
-         $user = AuthMiddleware::authorize(['admin']);
+         $user = AuthMiddleware::authorize(['admin', 'reviewer']);
 
          try {
              $pdo = Database::getConnection();

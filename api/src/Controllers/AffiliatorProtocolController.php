@@ -257,4 +257,162 @@ class AffiliatorProtocolController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
+    public function getReviewList(): void
+    {
+        AuthMiddleware::authorize(['reviewer', 'admin']);
+        try {
+            $pdo = Database::getConnection();
+
+            $filterValue = $_GET['filter_value'] ?? '';
+            $status = $_GET['status'] ?? '';
+            $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+            $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 8;
+            $offset = ($pageNo - 1) * $pageRow;
+
+            $whereParts = ["1=1"];
+            $params = [];
+
+            if (!empty($filterValue)) {
+                $whereParts[] = "(ap.protocol_name ILIKE :filter OR ap.indication ILIKE :filter OR a.name ILIKE :filter)";
+                $params['filter'] = "%{$filterValue}%";
+            }
+
+            if (!empty($status)) {
+                if (in_array($status, ['submitted', 'review'])) {
+                    $whereParts[] = "ap.status_id IN ('submitted', 'review')";
+                } elseif ($status === 'revision') {
+                    $whereParts[] = "ap.status_id = 'revision'";
+                } elseif ($status === 'approved') {
+                    $whereParts[] = "ap.status_id IN ('approved', 'active')";
+                } elseif ($status === 'rejected') {
+                    $whereParts[] = "ap.status_id = 'rejected'";
+                }
+            }
+
+            $whereSql = implode(' AND ', $whereParts);
+
+            $countSql = "
+                SELECT COUNT(*) 
+                FROM affiliator_protocols ap
+                JOIN affiliators a ON ap.affiliator_id = a.id
+                WHERE $whereSql
+            ";
+            $stmtCount = $pdo->prepare($countSql);
+            $stmtCount->execute($params);
+            $totalItems = $stmtCount->fetchColumn();
+
+            $sql = "
+                SELECT 
+                    ap.*,
+                    a.name as hospital_name
+                FROM affiliator_protocols ap
+                JOIN affiliators a ON ap.affiliator_id = a.id
+                WHERE $whereSql
+                ORDER BY ap.created_at DESC
+                LIMIT :limit OFFSET :offset
+            ";
+            
+            $stmt = $pdo->prepare($sql);
+            foreach ($params as $k => $v) {
+                $stmt->bindValue(":$k", $v);
+            }
+            $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+            $stmt->execute();
+            
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Fetch documents
+            if (!empty($items)) {
+                $ids = array_column($items, 'id');
+                $inQuery = implode(',', array_fill(0, count($ids), '?'));
+                $docStmt = $pdo->prepare("SELECT id, protocol_id, document_path FROM affiliator_protocol_documents WHERE protocol_id IN ($inQuery)");
+                $docStmt->execute($ids);
+                $docs = $docStmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                $docsByProtocol = [];
+                foreach ($docs as $doc) {
+                    $docsByProtocol[$doc['protocol_id']][] = [
+                        'id' => $doc['id'],
+                        'document_path' => $doc['document_path']
+                    ];
+                }
+                
+                foreach ($items as &$item) {
+                    $item['documents'] = $docsByProtocol[$item['id']] ?? [];
+                }
+            }
+
+            (new ApiResponse(true, 'Data fetched successfully', [
+                'items' => $items,
+                'total_items' => $totalItems,
+                'page_no' => $pageNo,
+                'page_row' => $pageRow
+            ]))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    public function reviewProtocol(): void
+    {
+        AuthMiddleware::authorize(['reviewer', 'admin']);
+        try {
+            $data = RequestHelper::getJsonBody();
+            
+            if (empty($data['id']) || empty($data['decision'])) {
+                (new ApiResponse(false, 'Missing required fields: id, decision'))->send(400);
+                return;
+            }
+
+            $id = $data['id'];
+            $decision = $data['decision'];
+            $reviewerNote = $data['reviewer_note'] ?? null;
+
+            $statusId = '';
+            if ($decision === 'approve') {
+                $statusId = 'approved';
+            } elseif ($decision === 'revision') {
+                $statusId = 'revision';
+            } elseif ($decision === 'reject') {
+                $statusId = 'rejected';
+            } else {
+                (new ApiResponse(false, 'Invalid decision'))->send(400);
+                return;
+            }
+
+            $pdo = Database::getConnection();
+
+            // Check if exists
+            $stmt = $pdo->prepare("SELECT id FROM affiliator_protocols WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            if (!$stmt->fetch()) {
+                (new ApiResponse(false, 'Protocol not found'))->send(404);
+                return;
+            }
+
+            // Update
+            $updateSql = "
+                UPDATE affiliator_protocols 
+                SET status_id = :status_id, reviewer_note = :reviewer_note 
+                WHERE id = :id 
+                RETURNING *
+            ";
+            $updateStmt = $pdo->prepare($updateSql);
+            $updateStmt->execute([
+                'status_id' => $statusId,
+                'reviewer_note' => $reviewerNote,
+                'id' => $id
+            ]);
+
+            $updatedRow = $updateStmt->fetch(PDO::FETCH_ASSOC);
+
+            (new ApiResponse(true, 'Review decision saved', $updatedRow))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }
