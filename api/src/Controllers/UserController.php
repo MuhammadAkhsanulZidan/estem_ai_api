@@ -23,9 +23,10 @@ class UserController
 
             if ($id !== null) {
                 $stmt = $pdo->prepare("
-                    SELECT id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at
-                    FROM users
-                    WHERE id = :id
+                    SELECT u.id, u.username, u.role_id, u.level_id, u.email, u.affiliator_id, u.reviewer_id, u.is_active, u.created_at, u.updated_at, a.affiliator_name
+                    FROM users u
+                    LEFT JOIN affiliators a ON u.affiliator_id = a.id
+                    WHERE u.id = :id
                 ");
                 $stmt->execute(['id' => $id]);
                 $user = $stmt->fetch();
