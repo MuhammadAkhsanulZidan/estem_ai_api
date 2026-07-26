@@ -100,32 +100,35 @@ class AffiliatorProtocolController
             $stmt->execute();
             $newProtocol = $stmt->fetch();
 
-            // Process File Upload for "Protokol hasil penyesuaian"
-            if (isset($_FILES['document']) && $_FILES['document']['error'] === UPLOAD_ERR_OK) {
+            // Process File Uploads dynamically
+            if (!empty($_FILES)) {
                 $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/';
                 if (!is_dir($uploadDir)) {
                     mkdir($uploadDir, 0777, true);
                 }
 
-                $file = $_FILES['document'];
-                $originalName = basename($file['name']);
-                $extension = pathinfo($originalName, PATHINFO_EXTENSION);
-                $filename = pathinfo($originalName, PATHINFO_FILENAME);
-                $randomId = bin2hex(random_bytes(2));
-                $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
-                $targetPath = $uploadDir . $sanitizedName;
+                foreach ($_FILES as $key => $file) {
+                    if ($file['error'] === UPLOAD_ERR_OK) {
+                        $originalName = basename($file['name']);
+                        $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                        $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                        $randomId = bin2hex(random_bytes(2));
+                        $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
+                        $targetPath = $uploadDir . $sanitizedName;
 
-                if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                    $dbPath = 'public/bck/affiliator/protocols/' . $sanitizedName;
+                        if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                            $dbPath = 'public/bck/affiliator/protocols/' . $sanitizedName;
 
-                    $insStmt = $pdo->prepare("
-                        INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
-                        VALUES (:protocol_id, :document_path)
-                    ");
-                    $insStmt->execute([
-                        'protocol_id' => $newProtocol['id'],
-                        'document_path' => $dbPath
-                    ]);
+                            $insStmt = $pdo->prepare("
+                                INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
+                                VALUES (:protocol_id, :document_path)
+                            ");
+                            $insStmt->execute([
+                                'protocol_id' => $newProtocol['id'],
+                                'document_path' => $dbPath
+                            ]);
+                        }
+                    }
                 }
             }
 
