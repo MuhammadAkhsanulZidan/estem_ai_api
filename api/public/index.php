@@ -105,6 +105,7 @@ try {
 
     $router->get('/v1/adverse-events', [AdverseEventController::class, 'get']);
     $router->post('/v1/adverse-events', [AdverseEventController::class, 'post']);
+    $router->post('/v1/adverse-events/review', [AdverseEventController::class, 'review']);
 
         $router->get('/v1/ecrf_sections', [EcrfSectionController::class, 'get']);
     $router->post('/v1/ecrf_sections', [EcrfSectionController::class, 'post']);
