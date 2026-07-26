@@ -13,7 +13,7 @@ class AffiliatorSupervisionController
     /**
      * Get active supervision registration details and documents.
      */
-    public function get()
+     public function get()
     {
         $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
 
@@ -32,8 +32,56 @@ class AffiliatorSupervisionController
 
             if ($affiliatorId === null) {
                 if ($user['data']['role_name'] == "admin" || $user['data']['role_name'] == "reviewer") {
-                    // Fetch all supervisions for admin list
-                    $stmt = $pdo->query("
+                    $filterField = $_GET['filter_field'] ?? "";
+                    $filterValue = $_GET['filter_value'] ?? "";
+                    $status = $_GET['status'] ?? "";
+                    $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+                    $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+                    $useLimit = $pageNo > 0 && $pageRow > 0;
+
+                    $where = 'WHERE 1=1';
+                    $params = [];
+
+                    // Allowed search fields map to SQL columns
+                    $allowedFields = [
+                        'hospital_name' => 'aff.affiliator_name',
+                        'pic_name' => 'asup.pic_name',
+                        'status' => 'asup.status'
+                    ];
+
+                    // Filter field & search value
+                    if ($filterField !== "" && $filterValue !== "" && isset($allowedFields[$filterField])) {
+                        $column = $allowedFields[$filterField];
+                        $where .= " AND {$column} ILIKE :val";
+                        $params['val'] = '%' . $filterValue . '%';
+                    } else if ($filterValue !== "") {
+                        // Default search across hospital_name and pic_name
+                        $where .= " AND (aff.affiliator_name ILIKE :val OR asup.pic_name ILIKE :val)";
+                        $params['val'] = '%' . $filterValue . '%';
+                    }
+
+                    // Explicit status filter
+                    if ($status !== "" && $status !== "Semua") {
+                        $where .= " AND asup.status ILIKE :status";
+                        $params['status'] = $status;
+                    }
+
+                    // 1a. Get total items count
+                    $countQuery = "
+                        SELECT COUNT(*)
+                        FROM affiliator_supervisions asup
+                        JOIN affiliators aff ON asup.affiliator_id = aff.id
+                        {$where}
+                    ";
+                    $countStmt = $pdo->prepare($countQuery);
+                    foreach ($params as $key => $val) {
+                        $countStmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                    }
+                    $countStmt->execute();
+                    $totalItems = (int)$countStmt->fetchColumn();
+
+                    // 1b. Query with pagination and filtering
+                    $query = "
                         SELECT
                             asup.*,
                             aff.affiliator_name AS hospital_name,
@@ -41,23 +89,53 @@ class AffiliatorSupervisionController
                             aff.address
                         FROM affiliator_supervisions asup
                         JOIN affiliators aff ON asup.affiliator_id = aff.id
+                        {$where}
                         ORDER BY asup.id DESC
-                    ");
+                    ";
+
+                    if ($useLimit) {
+                        $offset = ($pageNo - 1) * $pageRow;
+                        $query .= " LIMIT :limit OFFSET :offset";
+                    }
+
+                    $stmt = $pdo->prepare($query);
+                    foreach ($params as $key => $val) {
+                        $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                    }
+                    if ($useLimit) {
+                        $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+                    }
+
+                    $stmt->execute();
                     $supervisions = $stmt->fetchAll();
 
+                    // 1c. Attach nested document relations
                     foreach ($supervisions as &$sup) {
-                        $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_supervision_documents WHERE supervision_id = :id ORDER BY id DESC");
+                        $docStmt = $pdo->prepare("
+                            SELECT id, document_path
+                            FROM affiliator_supervision_documents
+                            WHERE supervision_id = :id
+                            ORDER BY id DESC
+                        ");
                         $docStmt->execute(['id' => $sup['id']]);
                         $sup['documents'] = $docStmt->fetchAll();
                     }
 
-                    (new ApiResponse(true, 'All supervisions retrieved', $supervisions))->send(200);
+                    $responseData = [
+                        'items' => $supervisions,
+                        'total_items' => $totalItems,
+                        'page_no' => $pageNo,
+                        'page_row' => $pageRow
+                    ];
+
+                    (new ApiResponse(true, 'All supervisions retrieved successfully', $responseData))->send(200);
                 } else {
                     (new ApiResponse(true, 'No affiliator associated', null))->send(200);
                 }
             }
 
-            // 2. Fetch supervision data joined with affiliator details
+            // 2. Single Affiliator detail branch (returns single record, no pagination)
             $stmt = $pdo->prepare("
                 SELECT
                     asup.*,
@@ -91,8 +169,13 @@ class AffiliatorSupervisionController
                 (new ApiResponse(true, 'No supervision progress found, returning profile defaults', $defaultData))->send(200);
             }
 
-            // 3. Fetch documents list as simple array of objects
-            $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_supervision_documents WHERE supervision_id = :supervision_id ORDER BY id DESC");
+            // 3. Fetch documents list
+            $docStmt = $pdo->prepare("
+                SELECT id, document_path
+                FROM affiliator_supervision_documents
+                WHERE supervision_id = :supervision_id
+                ORDER BY id DESC
+            ");
             $docStmt->execute(['supervision_id' => $supervision['id']]);
             $supervision['documents'] = $docStmt->fetchAll();
 
@@ -101,7 +184,6 @@ class AffiliatorSupervisionController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
-
     /**
      * Upsert supervision registration application progress.
      */
