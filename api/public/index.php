@@ -94,6 +94,8 @@ try {
     $router->post('/v1/affiliator-supervisions/review', [AffiliatorSupervisionController::class, 'review']);
     $router->get('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'get']);
     $router->post('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'post']);
+    $router->get('/v1/reviewer/patient-ecrfs', [PatientEcrfController::class, 'getReviewList']);
+    $router->post('/v1/reviewer/patient-ecrfs/review', [PatientEcrfController::class, 'postReview']);
     $router->get('/v1/patients', [PatientController::class, 'get']);
     $router->post('/v1/patients', [PatientController::class, 'post']);
     $router->get('/v1/patients/next-registration-number', [PatientController::class, 'getNextRegistrationNumber']);

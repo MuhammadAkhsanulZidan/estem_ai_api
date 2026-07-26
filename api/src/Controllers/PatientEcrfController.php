@@ -43,7 +43,7 @@ class PatientEcrfController
 
             // 2. Fetch patient responses
             $resStmt = $pdo->prepare("
-                SELECT section_id, answers_data, is_submitted 
+                SELECT section_id, answers_data, is_submitted, is_approved, reviewer_note 
                 FROM patient_ecrf_responses 
                 WHERE patient_id = :patient_id AND protocol_id = :protocol_id
             ");
@@ -54,7 +54,9 @@ class PatientEcrfController
             foreach ($responseRows as $r) {
                 $responses[(int)$r['section_id']] = [
                     'answers' => json_decode($r['answers_data'] ?? '{}', true) ?: new \stdClass(),
-                    'is_submitted' => (bool)$r['is_submitted']
+                    'is_submitted' => (bool)$r['is_submitted'],
+                    'is_approved' => (bool)$r['is_approved'],
+                    'reviewer_note' => $r['reviewer_note']
                 ];
             }
 
@@ -70,14 +72,14 @@ class PatientEcrfController
                 $rawSections[$secId] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
             }
 
-            // 3. Compute dynamic locking logic based on preceding submissions
-            $s1Submitted = !empty($responses[1]['is_submitted']);
-            $s2Submitted = $s1Submitted && !empty($responses[2]['is_submitted']);
-            $s3Submitted = $s2Submitted && !empty($responses[3]['is_submitted']);
+            // 3. Compute dynamic locking logic based on preceding approvals
+            $s1Approved = !empty($responses[1]['is_approved']);
+            $s2Approved = $s1Approved && !empty($responses[2]['is_approved']);
+            $s3Approved = $s2Approved && !empty($responses[3]['is_approved']);
 
-            $isL2Locked = !$s1Submitted;
-            $isL3Locked = $isL2Locked || !$s2Submitted;
-            $isL4Locked = $isL3Locked || !$s3Submitted;
+            $isL2Locked = !$s1Approved;
+            $isL3Locked = $isL2Locked || !$s2Approved;
+            $isL4Locked = $isL3Locked || !$s3Approved;
 
             $sections = [
                 'persiapan' => [
@@ -85,6 +87,8 @@ class PatientEcrfController
                     'questions' => $rawSections[1],
                     'answers' => $responses[1]['answers'] ?? new \stdClass(),
                     'is_submitted' => $responses[1]['is_submitted'] ?? false,
+                    'is_approved' => $responses[1]['is_approved'] ?? false,
+                    'reviewer_note' => $responses[1]['reviewer_note'] ?? null,
                     'is_locked' => false
                 ],
                 'pelaksanaan' => [
@@ -92,6 +96,8 @@ class PatientEcrfController
                     'questions' => $rawSections[2],
                     'answers' => $responses[2]['answers'] ?? new \stdClass(),
                     'is_submitted' => $responses[2]['is_submitted'] ?? false,
+                    'is_approved' => $responses[2]['is_approved'] ?? false,
+                    'reviewer_note' => $responses[2]['reviewer_note'] ?? null,
                     'is_locked' => $isL2Locked
                 ],
                 'monitoring' => [
@@ -99,6 +105,8 @@ class PatientEcrfController
                     'questions' => $rawSections[3],
                     'answers' => $responses[3]['answers'] ?? new \stdClass(),
                     'is_submitted' => $responses[3]['is_submitted'] ?? false,
+                    'is_approved' => $responses[3]['is_approved'] ?? false,
+                    'reviewer_note' => $responses[3]['reviewer_note'] ?? null,
                     'is_locked' => $isL3Locked
                 ],
                 'evaluasi' => [
@@ -106,6 +114,8 @@ class PatientEcrfController
                     'questions' => $rawSections[4],
                     'answers' => $responses[4]['answers'] ?? new \stdClass(),
                     'is_submitted' => $responses[4]['is_submitted'] ?? false,
+                    'is_approved' => $responses[4]['is_approved'] ?? false,
+                    'reviewer_note' => $responses[4]['reviewer_note'] ?? null,
                     'is_locked' => $isL4Locked
                 ]
             ];
@@ -138,18 +148,17 @@ class PatientEcrfController
             }
 
             // 1. Perform template and lock checking before saving
-            // (e.g. section 2 cannot be saved if section 1 is not submitted)
             if ((int)$sectionId > 1) {
                 $prevSecId = (int)$sectionId - 1;
-                $chk = $pdo->prepare("SELECT is_submitted FROM patient_ecrf_responses WHERE patient_id = :patient_id AND protocol_id = :protocol_id AND section_id = :section_id");
+                $chk = $pdo->prepare("SELECT is_approved FROM patient_ecrf_responses WHERE patient_id = :patient_id AND protocol_id = :protocol_id AND section_id = :section_id");
                 $chk->execute([
                     'patient_id' => $patientId,
                     'protocol_id' => $protocolId,
                     'section_id' => $prevSecId
                 ]);
                 $prevRes = $chk->fetch();
-                if (!$prevRes || !$prevRes['is_submitted']) {
-                    (new ApiResponse(false, 'Cannot save answers because previous section is locked or not submitted.'))->send(403);
+                if (!$prevRes || !$prevRes['is_approved']) {
+                    (new ApiResponse(false, 'Cannot save answers because previous section is locked or not approved by reviewer.'))->send(403);
                 }
             }
 
@@ -165,7 +174,6 @@ class PatientEcrfController
                         $qId = $q['id'];
                         $ansVal = $answersData[$qId] ?? null;
                         
-                        // Check empty/blank answers
                         if ($ansVal === null || $ansVal === '' || (is_array($ansVal) && empty($ansVal))) {
                             (new ApiResponse(false, "Pertanyaan '{$q['label']}' wajib diisi sebelum mengirim pengajuan."))->send(400);
                         }
@@ -189,17 +197,178 @@ class PatientEcrfController
                 RETURNING *
             ");
 
-            $stmt->bindValue(':patient_id', $patientId, PDO::PARAM_INT);
-            $stmt->bindValue(':protocol_id', $protocolId, PDO::PARAM_INT);
-            $stmt->bindValue(':section_id', $sectionId, PDO::PARAM_INT);
-            $stmt->bindValue(':answers_data', $jsonAnswers, PDO::PARAM_STR);
-            $stmt->bindValue(':is_submitted', $isSubmitted, PDO::PARAM_BOOL);
-            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
-
             $stmt->execute();
             $result = $stmt->fetch();
 
             (new ApiResponse(true, 'Answers saved successfully', $result))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Get list of eCRF sections submitted for review.
+     */
+    public function getReviewList()
+    {
+        AuthMiddleware::authorize(['reviewer', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+
+            $searchTerm = $_GET['filter_value'] ?? "";
+            $status = $_GET['status'] ?? "Semua"; // Semua, submitted, review, revision, approved, rejected
+            $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+            $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+
+            $where = "WHERE per.is_submitted = TRUE OR (per.is_submitted = FALSE AND per.reviewer_note IS NOT NULL AND per.reviewer_note != '')";
+            $params = [];
+
+            // Apply search term filter
+            if ($searchTerm !== "") {
+                $where .= " AND (ap.protocol_name ILIKE :search OR pe.patient_initial ILIKE :search OR pe.registration_number ILIKE :search)";
+                $params['search'] = '%' . $searchTerm . '%';
+            }
+
+            // Apply status filter
+            if ($status !== "Semua") {
+                if ($status === "submitted" || $status === "review") {
+                    $where .= " AND per.is_submitted = TRUE AND per.is_approved = FALSE AND (per.reviewer_note IS NULL OR per.reviewer_note = '')";
+                } else if ($status === "revision") {
+                    $where .= " AND per.is_submitted = TRUE AND per.is_approved = FALSE AND per.reviewer_note IS NOT NULL AND per.reviewer_note != ''";
+                } else if ($status === "approved") {
+                    $where .= " AND per.is_approved = TRUE";
+                } else if ($status === "rejected") {
+                    $where .= " AND per.is_submitted = FALSE AND per.reviewer_note IS NOT NULL AND per.reviewer_note != ''";
+                }
+            }
+
+            // Count query
+            $countStmt = $pdo->prepare("
+                SELECT COUNT(*) 
+                FROM patient_ecrf_responses per
+                JOIN patient_ecrfs pe ON per.patient_id = pe.id
+                JOIN admin_protocols ap ON per.protocol_id = ap.id
+                JOIN ecrf_sections es ON per.section_id = es.id
+                $where
+            ");
+            $countStmt->execute($params);
+            $totalItems = (int)$countStmt->fetchColumn();
+
+            // Paginated data query
+            $sql = "
+                SELECT 
+                    per.id,
+                    per.patient_id,
+                    per.protocol_id,
+                    per.section_id,
+                    per.is_submitted,
+                    per.is_approved,
+                    per.reviewer_note,
+                    per.answers_data,
+                    per.updated_at AS submission_date,
+                    pe.registration_number,
+                    pe.patient_initial,
+                    pe.gender,
+                    pe.pic_doctor,
+                    ap.protocol_name,
+                    ap.protocol_version,
+                    es.section_name
+                FROM patient_ecrf_responses per
+                JOIN patient_ecrfs pe ON per.patient_id = pe.id
+                JOIN admin_protocols ap ON per.protocol_id = ap.id
+                JOIN ecrf_sections es ON per.section_id = es.id
+                $where
+                ORDER BY per.updated_at DESC
+                LIMIT :limit OFFSET :offset
+            ";
+
+            $offset = ($pageNo - 1) * $pageRow;
+            $stmt = $pdo->prepare($sql);
+            foreach ($params as $key => $val) {
+                $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+            $stmt->execute();
+            $items = $stmt->fetchAll();
+
+            // Format documents count and description metadata dynamically
+            foreach ($items as &$item) {
+                $item['answers'] = json_decode($item['answers_data'], true) ?: new \stdClass();
+                $item['documents_count'] = 6; // Mock standard/clinical guideline docs count for detail panel
+                $item['description'] = "eCRF desain untuk pengumpulan data baseline dan follow-up pasien.";
+            }
+
+            $responseData = [
+                'items' => $items,
+                'total_items' => $totalItems,
+                'page_no' => $pageNo,
+                'page_row' => $pageRow
+            ];
+
+            (new ApiResponse(true, 'Submitted eCRFs retrieved successfully', $responseData))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Submit reviewer decision (approve, revision, reject) for a patient's eCRF stage.
+     */
+    public function postReview()
+    {
+        $user = AuthMiddleware::authorize(['reviewer', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $data['id'] ?? null;
+            $decision = trim($data['decision'] ?? ''); // approve, revision, reject
+            $reviewerNote = trim($data['reviewer_note'] ?? '');
+
+            if ($id === null || empty($decision)) {
+                (new ApiResponse(false, 'Response ID and Decision are required'))->send(400);
+            }
+
+            // Check if response exists
+            $stmt = $pdo->prepare("SELECT * FROM patient_ecrf_responses WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            $existing = $stmt->fetch();
+
+            if (!$existing) {
+                (new ApiResponse(false, 'eCRF response record not found'))->send(404);
+            }
+
+            $isApproved = ($decision === 'approve');
+            $isSubmitted = ($decision !== 'reject'); // Set is_submitted to false if rejected, allowing reload
+
+            $userId = $user['data']['id'];
+
+            $updateStmt = $pdo->prepare("
+                UPDATE patient_ecrf_responses
+                SET is_approved = :is_approved,
+                    is_submitted = :is_submitted,
+                    reviewer_note = :reviewer_note,
+                    approved_by = CASE WHEN :is_approved = TRUE THEN :user_id ELSE approved_by END,
+                    approved_at = CASE WHEN :is_approved = TRUE THEN NOW() ELSE approved_at END,
+                    updated_by = :user_id,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING *
+            ");
+
+            $updateStmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $updateStmt->bindValue(':is_submitted', $isSubmitted, PDO::PARAM_BOOL);
+            $updateStmt->bindValue(':reviewer_note', $reviewerNote === '' ? null : $reviewerNote, $reviewerNote === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $updateStmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+            $updateStmt->bindValue(':id', $id, PDO::PARAM_INT);
+
+            $updateStmt->execute();
+            $result = $updateStmt->fetch();
+
+            (new ApiResponse(true, 'Review decision saved successfully', $result))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
