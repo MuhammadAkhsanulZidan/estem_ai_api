@@ -41,6 +41,7 @@ class UserController
                 $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
                 $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
                 $isAffiliator = isset($_GET['is_affiliator']) ? (int)$_GET['is_affiliator'] : 0;
+                $isReviewer = isset($_GET['is_reviewer']) ? (int)$_GET['is_reviewer'] : 0;
 
                 $allowedFields = ['username'];
 
@@ -57,11 +58,15 @@ class UserController
                 }
 
                 if($isAffiliator == 1){
-                    $where = "{$where} AND affiliator_id IS NOT NULL";
+                    $where = "{$where} AND affiliator_id IS NOT NULL AND is_reviewer = 1";
+                }
+
+                if($isReviewer == 1){
+                    $where = "{$where} AND is_reviewer = 1";
                 }
 
                 // 1. Get total items count
-                $countQuery = "SELECT COUNT(*) FROM users $where";
+                $countQuery = "SELECT COUNT(*) FROM users {$where}";
                 $stmt = $pdo->prepare($countQuery);
                 foreach ($params as $key => $val) {
                     $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
@@ -345,8 +350,10 @@ class UserController
             $isActive = false; // Must be approved by admin
 
             // Check if email already exists
-            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE email = :email");
-            $checkStmt->execute(['email' => $email]);
+            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username AND affiliator_id = :affiliator_id");
+            $checkStmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $checkStmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
+            $checkStmt->execute();
             if ($checkStmt->fetch()) {
                 (new ApiResponse(false, 'Email already exists'))->send(400);
             }
@@ -386,26 +393,23 @@ class UserController
             $username = trim($data['username'] ?? '');
             $email = trim($data['email'] ?? '');
             $password = $data['password'] ?? '';
+            $affiliatorId = $data['affiliator_id'] ?? null;
 
-            if (empty($username) || empty($email) || empty($password)) {
-                (new ApiResponse(false, 'Username, email, and password are required'))->send(400);
+            if (empty($username) || empty($email) || empty($password) || $affiliatorId === null) {
+                (new ApiResponse(false, 'Username, email, password, and affiliator_id are required'))->send(400);
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
             $isActive = false; // Must be approved by admin
 
             // Check if email already exists
-            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE email = :email");
-            $checkStmt->execute(['email' => $email]);
+            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username AND affiliator_id = :affiliator_id");
+            $checkStmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $checkStmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
+            $checkStmt->execute();
             if ($checkStmt->fetch()) {
-                (new ApiResponse(false, 'Email already exists'))->send(400);
+                (new ApiResponse(false, 'Username already exists'))->send(400);
             }
-
-            // Fetch role ID for reviewer dynamically
-            $roleStmt = $pdo->prepare("SELECT id FROM roles WHERE name ILIKE 'reviewer'");
-            $roleStmt->execute();
-            $role = $roleStmt->fetch();
-            $roleId = $role ? $role['id'] : 2;
 
             $stmt = $pdo->prepare("
                 INSERT INTO users (username, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
@@ -414,8 +418,8 @@ class UserController
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $stmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
-            $stmt->bindValue(':level_id', 1, PDO::PARAM_INT); // Level 1 for standard user
+            $stmt->bindValue(':role_id', ROLE_ID::AFFILIATOR, PDO::PARAM_INT);
+            $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT); // Level 1 for standard user
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
