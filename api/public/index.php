@@ -52,6 +52,7 @@ use App\Controllers\AffiliatorSupervisionController;
 use App\Controllers\PatientEcrfController;
 use App\Controllers\PatientController;
 use App\Controllers\AffiliatorProfileController;
+use App\Controllers\AdverseEventController;
 
 try {
     $router = new Router();
@@ -101,6 +102,9 @@ try {
     $router->get('/v1/patients', [PatientController::class, 'get']);
     $router->post('/v1/patients', [PatientController::class, 'post']);
     $router->get('/v1/patients/next-registration-number', [PatientController::class, 'getNextRegistrationNumber']);
+
+    $router->get('/v1/adverse-events', [AdverseEventController::class, 'get']);
+    $router->post('/v1/adverse-events', [AdverseEventController::class, 'post']);
 
         $router->get('/v1/ecrf_sections', [EcrfSectionController::class, 'get']);
     $router->post('/v1/ecrf_sections', [EcrfSectionController::class, 'post']);
