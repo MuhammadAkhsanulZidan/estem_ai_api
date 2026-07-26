@@ -23,7 +23,7 @@ class UserController
 
             if ($id !== null) {
                 $stmt = $pdo->prepare("
-                    SELECT u.id, u.username, u.role_id, u.level_id, u.email, u.affiliator_id, u.reviewer_id, u.is_active, u.created_at, u.updated_at, a.affiliator_name
+                    SELECT u.id, u.username, u.role_id, u.level_id, u.email, u.affiliator_id, u.is_active, u.created_at, u.updated_at, a.affiliator_name
                     FROM users u
                     LEFT JOIN affiliators a ON u.affiliator_id = a.id
                     WHERE u.id = :id
@@ -59,11 +59,11 @@ class UserController
                 }
 
                 if($isAffiliator == 1){
-                    $where = "{$where} AND affiliator_id IS NOT NULL AND is_reviewer = 1";
+                    $where = "{$where} AND affiliator_id IS NOT NULL AND is_reviewer = false";
                 }
 
                 if($isReviewer == 1){
-                    $where = "{$where} AND is_reviewer = 1";
+                    $where = "{$where} AND is_reviewer = true";
                 }
 
                 // 1. Get total items count
@@ -79,7 +79,7 @@ class UserController
                 $query = "
                     SELECT u.id, u.username, u.email, u.is_active,
                     u.role_id, u.level_id,
-                    u.affiliator_id, a.affiliator_name, u.reviewer_id,
+                    u.affiliator_id, a.affiliator_name,
                     u.created_at
                     FROM users u
                     LEFT JOIN affiliators a ON u.affiliator_id = a.id
@@ -150,9 +150,9 @@ class UserController
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, reviewer_id, is_active, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :reviewer_id, :is_active, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at
+                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id,  is_active, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, : :is_active, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, affiliator_id,  is_active, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -226,11 +226,11 @@ class UserController
                     email = :email,
                     password_hash = :password_hash,
                     affiliator_id = :affiliator_id,
-                    reviewer_id = :reviewer_id,
+                    reviewer_id = :
                     is_active = :is_active,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at
+                RETURNING id, username, role_id, level_id, email, affiliator_id,  is_active, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -280,7 +280,7 @@ class UserController
                 SET is_active = :is_active,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_active, created_at, updated_at
+                RETURNING id, username, role_id, level_id, email, affiliator_id,  is_active, created_at, updated_at
             ");
 
             $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
