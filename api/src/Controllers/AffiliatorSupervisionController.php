@@ -31,10 +31,10 @@ class AffiliatorSupervisionController
             }
 
             if ($affiliatorId === null) {
-                if (in_array('admin', $user['data']['roles'] ?? [])) {
+                if ($user['data']['role_name'] == "admin") {
                     // Fetch all supervisions for admin list
                     $stmt = $pdo->query("
-                        SELECT 
+                        SELECT
                             asup.*,
                             aff.affiliator_name AS hospital_name,
                             aff.affiliator_type AS institution_type,
@@ -59,7 +59,7 @@ class AffiliatorSupervisionController
 
             // 2. Fetch supervision data joined with affiliator details
             $stmt = $pdo->prepare("
-                SELECT 
+                SELECT
                     asup.*,
                     aff.affiliator_name AS hospital_name,
                     aff.affiliator_type AS institution_type,
@@ -227,7 +227,7 @@ class AffiliatorSupervisionController
                 if ($absPath && file_exists($absPath) && is_file($absPath)) {
                     unlink($absPath);
                 }
-                
+
                 $delStmt = $pdo->prepare("DELETE FROM affiliator_supervision_documents WHERE id = :id");
                 $delStmt->execute(['id' => $id]);
             }
@@ -241,55 +241,61 @@ class AffiliatorSupervisionController
     /**
      * Update supervision review status and notes by admin.
      */
-    public function review()
-    {
-        $user = AuthMiddleware::authorize(['admin']);
+     public function review()
+     {
+         $user = AuthMiddleware::authorize(['admin']);
 
-        try {
-            $pdo = Database::getConnection();
-            $data = RequestHelper::getBody();
+         try {
+             $pdo = Database::getConnection();
+             $data = RequestHelper::getBody();
 
-            $id = $data['id'] ?? null;
-            $status = trim($data['status'] ?? '');
-            $reviewNotes = trim($data['review_notes'] ?? '');
+             $id = $data['id'] ?? null;
+             $status = trim($data['status'] ?? '');
+             $reviewNotes = trim($data['review_notes'] ?? '');
 
-            if ($id === null || empty($status)) {
-                (new ApiResponse(false, 'Supervision ID and Status are required'))->send(400);
-            }
+             if ($id === null || empty($status)) {
+                 (new ApiResponse(false, 'Supervision ID and Status are required'))->send(400);
+                 return;
+             }
 
-            if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
-                (new ApiResponse(false, 'Invalid status.'))->send(400);
-            }
+             if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
+                 (new ApiResponse(false, 'Invalid status.'))->send(400);
+                 return;
+             }
 
-            $userId = $user['data']['id'];
+             $userId = $user['data']['id'];
 
-            $stmt = $pdo->prepare("
-                UPDATE affiliator_supervisions
-                SET status = :status,
-                    review_notes = :review_notes,
-                    approved_by = CASE WHEN :status = 'approved' OR :status = 'active' THEN :user_id ELSE approved_by END,
-                    approved_at = CASE WHEN :status = 'approved' OR :status = 'active' THEN NOW() ELSE approved_at END,
-                    updated_by = :user_id,
-                    updated_at = NOW()
-                WHERE id = :id
-                RETURNING *
-            ");
-            
-            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
-            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+             $stmt = $pdo->prepare("
+                 UPDATE affiliator_supervisions
+                 SET status = :status::varchar,
+                     review_notes = :review_notes,
+                     approved_by = CASE WHEN :status_check::varchar IN ('approved', 'active') THEN :approved_user_id::integer ELSE approved_by END,
+                     approved_at = CASE WHEN :status_check2::varchar IN ('approved', 'active') THEN NOW() ELSE approved_at END,
+                     updated_by = :user_id::integer,
+                     updated_at = NOW()
+                 WHERE id = :id::integer
+                 RETURNING *
+             ");
 
-            $stmt->execute();
-            $result = $stmt->fetch();
+             $stmt->bindValue(':status', $status, PDO::PARAM_STR);
+             $stmt->bindValue(':status_check', $status, PDO::PARAM_STR);
+             $stmt->bindValue(':status_check2', $status, PDO::PARAM_STR);
+             $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+             $stmt->bindValue(':approved_user_id', $userId, PDO::PARAM_INT);
+             $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+             $stmt->bindValue(':id', $id, PDO::PARAM_INT);
 
-            if (!$result) {
-                (new ApiResponse(false, 'Supervision registration record not found.'))->send(404);
-            }
+             $stmt->execute();
+             $result = $stmt->fetch();
 
-            (new ApiResponse(true, 'Supervision status updated successfully', $result))->send(200);
-        } catch (\Throwable $e) {
-            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
-        }
-    }
+             if (!$result) {
+                 (new ApiResponse(false, 'Supervision registration record not found.'))->send(404);
+                 return;
+             }
+
+             (new ApiResponse(true, 'Supervision status updated successfully', $result))->send(200);
+         } catch (\Throwable $e) {
+             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+         }
+     }
 }
