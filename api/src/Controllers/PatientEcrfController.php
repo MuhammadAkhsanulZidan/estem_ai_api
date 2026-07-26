@@ -29,12 +29,12 @@ class PatientEcrfController
 
             // 1. Fetch eCRF template sections
             $stmt = $pdo->prepare("
-                SELECT 
+                SELECT
                     es.id AS section_id,
                     es.section_name,
                     ape.questions_schema
                 FROM ecrf_sections es
-                LEFT JOIN admin_protocol_ecrfs ape 
+                LEFT JOIN admin_protocol_ecrfs ape
                     ON es.id = ape.section_id AND ape.protocol_id = :protocol_id
                 ORDER BY es.id ASC
             ");
@@ -43,8 +43,8 @@ class PatientEcrfController
 
             // 2. Fetch patient responses
             $resStmt = $pdo->prepare("
-                SELECT section_id, answers_data, is_submitted, is_approved, reviewer_note 
-                FROM patient_ecrf_responses 
+                SELECT section_id, answers_data, is_submitted, is_approved, reviewer_note
+                FROM patient_ecrf_responses
                 WHERE patient_id = :patient_id AND protocol_id = :protocol_id
             ");
             $resStmt->execute(['patient_id' => $patientId, 'protocol_id' => $protocolId]);
@@ -173,7 +173,7 @@ class PatientEcrfController
                     if (!empty($q['required'])) {
                         $qId = $q['id'];
                         $ansVal = $answersData[$qId] ?? null;
-                        
+
                         if ($ansVal === null || $ansVal === '' || (is_array($ansVal) && empty($ansVal))) {
                             (new ApiResponse(false, "Pertanyaan '{$q['label']}' wajib diisi sebelum mengirim pengajuan."))->send(400);
                         }
@@ -197,7 +197,15 @@ class PatientEcrfController
                 RETURNING *
             ");
 
-            $stmt->execute();
+            // FIX: Pass the array of parameters to execute()
+            $stmt->execute([
+                'patient_id'   => $patientId,
+                'protocol_id'  => $protocolId,
+                'section_id'   => $sectionId,
+                'answers_data' => $jsonAnswers,
+                'is_submitted' => $isSubmitted ? 'true' : 'false',
+                'user_id'      => $userId,
+            ]);
             $result = $stmt->fetch();
 
             (new ApiResponse(true, 'Answers saved successfully', $result))->send(200);
@@ -245,7 +253,7 @@ class PatientEcrfController
 
             // Count query
             $countStmt = $pdo->prepare("
-                SELECT COUNT(*) 
+                SELECT COUNT(*)
                 FROM patient_ecrf_responses per
                 JOIN patient_ecrfs pe ON per.patient_id = pe.id
                 JOIN admin_protocols ap ON per.protocol_id = ap.id
@@ -257,7 +265,7 @@ class PatientEcrfController
 
             // Paginated data query
             $sql = "
-                SELECT 
+                SELECT
                     per.id,
                     per.patient_id,
                     per.protocol_id,
@@ -344,7 +352,8 @@ class PatientEcrfController
             $isApproved = ($decision === 'approve');
             $isSubmitted = ($decision !== 'reject'); // Set is_submitted to false if rejected, allowing reload
 
-            $userId = $user['data']['id'];
+            $isApprovedStr = $isApproved ? 'true' : 'false';
+            $isSubmittedStr = $isSubmitted ? 'true' : 'false';
 
             $updateStmt = $pdo->prepare("
                 UPDATE patient_ecrf_responses
@@ -359,6 +368,15 @@ class PatientEcrfController
                 RETURNING *
             ");
 
+            // FIX: Pass parameters array directly to execute()
+            $updateStmt->execute([
+                'is_approved'   => $isApprovedStr,
+                'is_submitted'  => $isSubmittedStr,
+                'reviewer_note' => $reviewerNote === '' ? null : $reviewerNote,
+                'user_id'       => $userId,
+                'id'            => $id,
+            ]);
+            $result = $updateStmt->fetch();
             $updateStmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $updateStmt->bindValue(':is_submitted', $isSubmitted, PDO::PARAM_BOOL);
             $updateStmt->bindValue(':reviewer_note', $reviewerNote === '' ? null : $reviewerNote, $reviewerNote === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);

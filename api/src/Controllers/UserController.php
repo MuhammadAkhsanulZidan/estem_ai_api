@@ -58,12 +58,12 @@ class UserController
                     $params['val'] = '%' . $filterValue . '%';
                 }
 
-                if($isAffiliator == 1){
-                    $where = "{$where} AND affiliator_id IS NOT NULL AND is_reviewer = false";
+                if ($isAffiliator == 1) {
+                    $where .= " AND affiliator_id IS NOT NULL AND role_id = " . ROLE_ID::AFFILIATOR;
                 }
 
                 if($isReviewer == 1){
-                    $where = "{$where} AND is_reviewer = true";
+                    $where .= " AND role_id = ". ROLE_ID::REVIEWER;
                 }
 
                 // 1. Get total items count
@@ -413,13 +413,14 @@ class UserController
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :is_active, NOW(), NOW())
+                INSERT INTO users (username, affiliator_id, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
+                VALUES (:username, :affiliator_id, :role_id, :level_id, :email, :password_hash, :is_active, NOW(), NOW())
                 RETURNING id, username, role_id, level_id, email, is_active, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $stmt->bindValue(':role_id', ROLE_ID::AFFILIATOR, PDO::PARAM_INT);
+            $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_STR);
+            $stmt->bindValue(':role_id', ROLE_ID::REVIEWER, PDO::PARAM_INT);
             $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT); // Level 1 for standard user
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
