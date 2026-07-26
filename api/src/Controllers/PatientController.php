@@ -42,7 +42,7 @@ class PatientController
             }
 
             $sql = "
-                SELECT 
+                SELECT
                     pe.*,
                     ap.protocol_name,
                     ap.protocol_version,
@@ -102,7 +102,7 @@ class PatientController
             $countStmt = $pdo->prepare("SELECT COUNT(*) FROM patient_ecrfs WHERE registration_number LIKE :prefix");
             $countStmt->execute(['prefix' => $prefix . '%']);
             $count = (int)$countStmt->fetchColumn();
-            
+
             $counter = $count + 1;
             $registrationNumber = $prefix . str_pad($counter, 4, '0', STR_PAD_LEFT);
 
@@ -149,7 +149,7 @@ class PatientController
             $countStmt = $pdo->prepare("SELECT COUNT(*) FROM patient_ecrfs WHERE registration_number LIKE :prefix");
             $countStmt->execute(['prefix' => $prefix . '%']);
             $count = (int)$countStmt->fetchColumn();
-            
+
             $counter = $count + 1;
             $nextRegNo = $prefix . str_pad($counter, 4, '0', STR_PAD_LEFT);
 

@@ -50,6 +50,7 @@ use App\Controllers\EcrfSectionController;
 use App\Controllers\AdminProtocolDocumentController;
 use App\Controllers\AffiliatorSupervisionController;
 use App\Controllers\PatientEcrfController;
+use App\Controllers\PatientController;
 use App\Controllers\AffiliatorProfileController;
 
 try {
