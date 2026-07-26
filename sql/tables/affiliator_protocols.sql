@@ -3,6 +3,7 @@ DROP TABLE IF EXISTS affiliator_protocols;
 CREATE TABLE affiliator_protocols (
     id BIGSERIAL PRIMARY KEY,
     affiliator_id BIGINT NOT NULL,
+    protocol_reference_id BIGINT REFERENCES admin_protocols(id) ON DELETE SET NULL,
     protocol_name   VARCHAR(255) NOT NULL,
     indication  VARCHAR(100),
     protocol_version VARCHAR(20),
