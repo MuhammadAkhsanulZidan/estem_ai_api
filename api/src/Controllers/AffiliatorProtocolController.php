@@ -10,7 +10,7 @@ use PDO;
 
 class AffiliatorProtocolController
 {
-    /**
+/**
      * Retrieve affiliator protocols (all or single by ID).
      */
     public function get()
@@ -20,7 +20,20 @@ class AffiliatorProtocolController
             $id = $_GET['id'] ?? null;
 
             if ($id !== null) {
-                $stmt = $pdo->prepare("SELECT * FROM affiliator_protocols WHERE id = :id");
+                // Single Protocol with aggregated documents
+                $stmt = $pdo->prepare("
+                    SELECT
+                        ap.*,
+                        COALESCE(
+                            (
+                                SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
+                                FROM affiliator_protocol_documents doc
+                                WHERE doc.protocol_id = ap.id
+                            ), '[]'::json
+                        ) AS documents
+                    FROM affiliator_protocols ap
+                    WHERE ap.id = :id
+                ");
                 $stmt->execute(['id' => $id]);
                 $protocol = $stmt->fetch();
 
@@ -28,28 +41,89 @@ class AffiliatorProtocolController
                     (new ApiResponse(false, 'Protocol not found'))->send(404);
                 }
 
-                $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_protocol_documents WHERE protocol_id = :protocol_id");
-                $docStmt->execute(['protocol_id' => $protocol['id']]);
-                $protocol['documents'] = $docStmt->fetchAll() ?: [];
+                $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
 
                 (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
             } else {
-                $stmt = $pdo->query("SELECT * FROM affiliator_protocols ORDER BY id DESC");
-                $protocols = $stmt->fetchAll();
+                $filterField = $_GET['filter_field'] ?? "";
+                $filterValue = $_GET['filter_value'] ?? "";
+                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+                $allowedFields = ['protocol_name'];
 
-                foreach ($protocols as &$p) {
-                    $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_protocol_documents WHERE protocol_id = :protocol_id");
-                    $docStmt->execute(['protocol_id' => $p['id']]);
-                    $p['documents'] = $docStmt->fetchAll() ?: [];
+                $where = '';
+                $params = [];
+
+                if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
+                    $where = "WHERE ap.{$filterField} ILIKE :val";
+                    $params['val'] = '%' . $filterValue . '%';
+                } else if ($filterValue !== "") {
+                    $where = "WHERE ap.protocol_name ILIKE :val";
+                    $params['val'] = '%' . $filterValue . '%';
                 }
 
-                (new ApiResponse(true, 'Protocols retrieved successfully', $protocols))->send(200);
+                // 1. Get total items count
+                $countQuery = "SELECT COUNT(*) FROM affiliator_protocols ap $where";
+                $stmt = $pdo->prepare($countQuery);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                $stmt->execute();
+                $totalItems = (int)$stmt->fetchColumn();
+
+                // 2. Get paginated results with aggregated documents
+                $query = "
+                    SELECT
+                        ap.*, aff.affiliator_name,
+                        COALESCE(
+                            (
+                                SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
+                                FROM affiliator_protocol_documents doc
+                                WHERE doc.protocol_id = ap.id
+                            ), '[]'::json
+                        ) AS documents
+                    FROM affiliator_protocols ap
+                    LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
+                    $where
+                    ORDER BY ap.id DESC
+                ";
+
+                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
+                if ($useLimit) {
+                    $offset = ($pageNo - 1) * $pageRow;
+                    $query .= " LIMIT :limit OFFSET :offset";
+                }
+
+                $stmt = $pdo->prepare($query);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+                }
+                if ($useLimit) {
+                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+                }
+
+                $stmt->execute();
+                $protocols = $stmt->fetchAll();
+
+                // Decode JSON string returned by PostgreSQL for each row
+                foreach ($protocols as &$p) {
+                    $p['documents'] = json_decode($p['documents'] ?? '[]', true);
+                }
+
+                $responseData = [
+                    'items'       => $protocols,
+                    'total_items' => $totalItems,
+                    'page_no'     => $pageNo ?? 1,
+                    'page_row'    => $pageRow ?? $totalItems
+                ];
+
+                (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
             }
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
-
     /**
      * Create a new affiliator protocol.
      */
@@ -59,7 +133,7 @@ class AffiliatorProtocolController
 
         try {
             $pdo = Database::getConnection();
-            
+
             // Support both JSON body and multipart/form-data POST fields
             $data = $_POST;
             if (empty($data)) {
@@ -293,7 +367,7 @@ class AffiliatorProtocolController
             $whereSql = implode(' AND ', $whereParts);
 
             $countSql = "
-                SELECT COUNT(*) 
+                SELECT COUNT(*)
                 FROM affiliator_protocols ap
                 JOIN affiliators a ON ap.affiliator_id = a.id
                 WHERE $whereSql
@@ -303,7 +377,7 @@ class AffiliatorProtocolController
             $totalItems = $stmtCount->fetchColumn();
 
             $sql = "
-                SELECT 
+                SELECT
                     ap.*,
                     a.name as hospital_name
                 FROM affiliator_protocols ap
@@ -312,7 +386,7 @@ class AffiliatorProtocolController
                 ORDER BY ap.created_at DESC
                 LIMIT :limit OFFSET :offset
             ";
-            
+
             $stmt = $pdo->prepare($sql);
             foreach ($params as $k => $v) {
                 $stmt->bindValue(":$k", $v);
@@ -320,7 +394,7 @@ class AffiliatorProtocolController
             $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
             $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
             $stmt->execute();
-            
+
             $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Fetch documents
@@ -330,7 +404,7 @@ class AffiliatorProtocolController
                 $docStmt = $pdo->prepare("SELECT id, protocol_id, document_path FROM affiliator_protocol_documents WHERE protocol_id IN ($inQuery)");
                 $docStmt->execute($ids);
                 $docs = $docStmt->fetchAll(PDO::FETCH_ASSOC);
-                
+
                 $docsByProtocol = [];
                 foreach ($docs as $doc) {
                     $docsByProtocol[$doc['protocol_id']][] = [
@@ -338,7 +412,7 @@ class AffiliatorProtocolController
                         'document_path' => $doc['document_path']
                     ];
                 }
-                
+
                 foreach ($items as &$item) {
                     $item['documents'] = $docsByProtocol[$item['id']] ?? [];
                 }
@@ -361,7 +435,7 @@ class AffiliatorProtocolController
         AuthMiddleware::authorize(['reviewer', 'admin']);
         try {
             $data = RequestHelper::getJsonBody();
-            
+
             if (empty($data['id']) || empty($data['decision'])) {
                 (new ApiResponse(false, 'Missing required fields: id, decision'))->send(400);
                 return;
@@ -395,9 +469,9 @@ class AffiliatorProtocolController
 
             // Update
             $updateSql = "
-                UPDATE affiliator_protocols 
-                SET status_id = :status_id, reviewer_note = :reviewer_note 
-                WHERE id = :id 
+                UPDATE affiliator_protocols
+                SET status_id = :status_id, reviewer_note = :reviewer_note
+                WHERE id = :id
                 RETURNING *
             ";
             $updateStmt = $pdo->prepare($updateSql);
