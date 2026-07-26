@@ -281,11 +281,13 @@ class PatientEcrfController
                     pe.pic_doctor,
                     ap.protocol_name,
                     ap.protocol_version,
-                    es.section_name
+                    es.section_name,
+                    ape.questions_schema
                 FROM patient_ecrf_responses per
                 JOIN patient_ecrfs pe ON per.patient_id = pe.id
                 JOIN admin_protocols ap ON per.protocol_id = ap.id
                 JOIN ecrf_sections es ON per.section_id = es.id
+                LEFT JOIN admin_protocol_ecrfs ape ON per.protocol_id = ape.protocol_id AND per.section_id = ape.section_id
                 $where
                 ORDER BY per.updated_at DESC
                 LIMIT :limit OFFSET :offset
@@ -304,6 +306,7 @@ class PatientEcrfController
             // Format documents count and description metadata dynamically
             foreach ($items as &$item) {
                 $item['answers'] = json_decode($item['answers_data'], true) ?: new \stdClass();
+                $item['questions_schema'] = json_decode($item['questions_schema'] ?? '[]', true) ?: [];
                 $item['documents_count'] = 6; // Mock standard/clinical guideline docs count for detail panel
                 $item['description'] = "eCRF desain untuk pengumpulan data baseline dan follow-up pasien.";
             }
