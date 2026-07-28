@@ -139,6 +139,23 @@ class AffiliatorSupervisionController
                     // Decode JSON documents string returned by PostgreSQL
                     foreach ($supervisions as &$sup) {
                         $sup['documents'] = json_decode($sup['documents'] ?? '[]', true);
+                        
+                        $is_posted = $sup['is_posted'] ?? false;
+                        $is_reviewed = $sup['is_reviewed'] ?? false;
+                        $is_revised = $sup['is_revised'] ?? false;
+                        $is_approved = $sup['is_approved'] ?? false;
+                        
+                        if (!$is_posted) {
+                            $sup['status'] = 'draft';
+                        } else if ($is_reviewed && $is_approved) {
+                            $sup['status'] = 'approved';
+                        } else if ($is_reviewed && !$is_approved && $is_revised) {
+                            $sup['status'] = 'revision';
+                        } else if ($is_reviewed && !$is_approved && !$is_revised) {
+                            $sup['status'] = 'rejected';
+                        } else {
+                            $sup['status'] = 'submitted';
+                        }
                     }
 
                     $responseData = [
@@ -185,6 +202,23 @@ class AffiliatorSupervisionController
 
             $supervision['documents'] = json_decode($supervision['documents'] ?? '[]', true);
 
+            $is_posted = $supervision['is_posted'] ?? false;
+            $is_reviewed = $supervision['is_reviewed'] ?? false;
+            $is_revised = $supervision['is_revised'] ?? false;
+            $is_approved = $supervision['is_approved'] ?? false;
+            
+            if (!$is_posted) {
+                $supervision['status'] = 'draft';
+            } else if ($is_reviewed && $is_approved) {
+                $supervision['status'] = 'approved';
+            } else if ($is_reviewed && !$is_approved && $is_revised) {
+                $supervision['status'] = 'revision';
+            } else if ($is_reviewed && !$is_approved && !$is_revised) {
+                $supervision['status'] = 'rejected';
+            } else {
+                $supervision['status'] = 'submitted';
+            }
+
             (new ApiResponse(true, 'Supervision details retrieved successfully', $supervision))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
@@ -209,9 +243,6 @@ class AffiliatorSupervisionController
                 (new ApiResponse(false, 'Affiliator profile is not initialized yet.'))->send(400);
             }
 
-            // Ensure status column exists in table
-            $pdo->exec("ALTER TABLE affiliator_supervisions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft'");
-
             $picName = trim($data['pic_name'] ?? '');
             
             $status = trim($data['status'] ?? 'draft');
@@ -228,6 +259,7 @@ class AffiliatorSupervisionController
                     return;
                 }
                 $referenceId = $existing['reference_id'];
+            } else {
                 $yearMonth = date('Ym');
                 $countQuery = $pdo->query("SELECT COUNT(*) FROM affiliator_supervisions");
                 $count = (int)$countQuery->fetchColumn() + 1;
@@ -236,13 +268,15 @@ class AffiliatorSupervisionController
 
             // 2. Perform UPSERT on supervision metadata
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, status, created_by, updated_by, created_at, updated_at)
-                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, :status, :user_id, :user_id, NOW(), NOW())
+                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, is_reviewed, is_approved, is_revised, created_by, updated_by, created_at, updated_at)
+                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, false, false, false, :user_id, :user_id, NOW(), NOW())
                 ON CONFLICT (affiliator_id)
                 DO UPDATE SET
                     pic_name = EXCLUDED.pic_name,
                     is_posted = EXCLUDED.is_posted,
-                    status = EXCLUDED.status,
+                    is_reviewed = false,
+                    is_approved = false,
+                    is_revised = false,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
                 RETURNING *
@@ -252,7 +286,6 @@ class AffiliatorSupervisionController
                 'affiliator_id' => $affiliatorId,
                 'pic_name' => $picName,
                 'is_posted' => $isPosted,
-                'status' => $status,
                 'user_id' => $userId
             ]);
 
@@ -374,8 +407,7 @@ class AffiliatorSupervisionController
 
             $stmt = $pdo->prepare("
                 UPDATE affiliator_supervisions
-                SET status = :status::varchar,
-                    review_notes = :review_notes,
+                SET review_notes = :review_notes,
                     is_approved = CASE WHEN :status_check1::varchar IN ('approved', 'active') THEN true ELSE false END,
                     is_reviewed = true,
                     is_revised = CASE WHEN :status_check2::varchar = 'revision' THEN true ELSE false END,
@@ -388,7 +420,6 @@ class AffiliatorSupervisionController
                 RETURNING *
             ");
 
-            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
             $stmt->bindValue(':status_check1', $status, PDO::PARAM_STR);
             $stmt->bindValue(':status_check2', $status, PDO::PARAM_STR);
             $stmt->bindValue(':status_check3', $status, PDO::PARAM_STR);
