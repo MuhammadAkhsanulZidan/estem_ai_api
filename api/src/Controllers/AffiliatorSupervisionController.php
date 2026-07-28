@@ -213,7 +213,7 @@ class AffiliatorSupervisionController
             $pdo->exec("ALTER TABLE affiliator_supervisions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft'");
 
             $picName = trim($data['pic_name'] ?? '');
-            
+
             $status = trim($data['status'] ?? 'draft');
             $isPosted = ($status === 'submitted') ? 'true' : 'false';
 
