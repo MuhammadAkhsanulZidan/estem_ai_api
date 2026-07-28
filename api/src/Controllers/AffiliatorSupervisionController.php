@@ -209,24 +209,40 @@ class AffiliatorSupervisionController
                 (new ApiResponse(false, 'Affiliator profile is not initialized yet.'))->send(400);
             }
 
-            $picName = trim($data['pic_name'] ?? '');
-            $isPosted = $data['is_posted'] == '1' ? 'true' : 'false';
+            // Ensure status column exists in table
+            $pdo->exec("ALTER TABLE affiliator_supervisions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft'");
 
-            $referenceId = Database::fetchColumn("
-                SELECT 'EA-RS-' || TO_CHAR(CURRENT_DATE, 'YYYYMM')
-                    || '-'
-                    || LPAD((COUNT(*) + 1)::text, 4, '0') AS reference_id
-                FROM affiliator_supervisions
-            ");
+            $picName = trim($data['pic_name'] ?? '');
+            
+            $status = trim($data['status'] ?? 'draft');
+            $isPosted = ($status === 'submitted') ? 'true' : 'false';
+
+            // Check if record exists
+            $checkStmt = $pdo->prepare("SELECT reference_id, is_posted FROM affiliator_supervisions WHERE affiliator_id = :affiliator_id");
+            $checkStmt->execute(['affiliator_id' => $affiliatorId]);
+            $existing = $checkStmt->fetch();
+
+            if ($existing) {
+                if ($existing['is_posted']) {
+                    (new ApiResponse(false, 'Pengajuan pengampuan telah dikirim dan tidak dapat diubah.'))->send(400);
+                    return;
+                }
+                $referenceId = $existing['reference_id'];
+            } else {
+                $yearMonth = date('Ym');
+                $count = (int)Database::fetchColumn("SELECT COUNT(*) FROM affiliator_supervisions") + 1;
+                $referenceId = sprintf("EA-RS-%s-%04d", $yearMonth, $count);
+            }
 
             // 2. Perform UPSERT on supervision metadata
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, created_by, updated_by, created_at, updated_at)
-                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, :user_id, :user_id, NOW(), NOW())
+                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, status, created_by, updated_by, created_at, updated_at)
+                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, :status, :user_id, :user_id, NOW(), NOW())
                 ON CONFLICT (affiliator_id)
                 DO UPDATE SET
                     pic_name = EXCLUDED.pic_name,
                     is_posted = EXCLUDED.is_posted,
+                    status = EXCLUDED.status,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
                 RETURNING *
@@ -236,6 +252,7 @@ class AffiliatorSupervisionController
                 'affiliator_id' => $affiliatorId,
                 'pic_name' => $picName,
                 'is_posted' => $isPosted,
+                'status' => $status,
                 'user_id' => $userId
             ]);
 
