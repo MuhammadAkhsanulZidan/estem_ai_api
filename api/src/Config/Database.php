@@ -63,4 +63,41 @@ class Database
 
         return self::$instance;
     }
+
+    /**
+    * Executes a query and returns a single row.
+    */
+    public static function fetch(string $sql, array $params = []): array|false
+    {
+        $stmt = self::execute($sql, $params);
+        return $stmt->fetch();
+    }
+
+    /**
+        * Executes a query and returns all matching rows.
+        */
+    public static function fetchAll(string $sql, array $params = []): array
+    {
+        $stmt = self::execute($sql, $params);
+        return $stmt->fetchAll();
+    }
+
+    /**
+        * Executes a query and returns a single column value (e.g. SELECT COUNT(*) or SELECT JSON function).
+        */
+    public static function fetchColumn(string $sql, array $params = [], int $column = 0): mixed
+    {
+        $stmt = self::execute($sql, $params);
+        return $stmt->fetchColumn($column);
+    }
+
+    /**
+    * Base method that prepares and executes any SQL query.
+    */
+    public static function execute(string $sql, array $params = []): PDOStatement
+    {
+        $stmt = self::getConnection()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt;
+    }
 }

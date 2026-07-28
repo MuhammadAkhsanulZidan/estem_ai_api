@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS affiliator_protocol_documents;
 DROP TABLE IF EXISTS affiliator_protocols;
 
 CREATE TABLE affiliator_protocols (
@@ -7,7 +8,10 @@ CREATE TABLE affiliator_protocols (
     protocol_name   VARCHAR(255) NOT NULL,
     indication  VARCHAR(100),
     protocol_version VARCHAR(20),
-    status_id VARCHAR(20) NOT NULL,
+    is_posted BOOLEAN NOT NULL DEFAULT FALSE,
+    is_revised BOOLEAN NOT NULL DEFAULT FALSE,
+    is_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+    is_approved BOOLEAN NOT NULL DEFAULT FALSE,
     creator_note    VARCHAR(100),
     reviewer_note VARCHAR(100),
     created_at TIMESTAMP DEFAULT NOW(),

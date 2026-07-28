@@ -61,4 +61,69 @@ class RequestHelper {
 
         return $input;
     }
+
+    /**
+    * Executes a paginated SQL query along with total count calculation.
+    *
+    * @param PDO $pdo
+    * @param string $baseQuery SQL query without WHERE or ORDER BY clauses.
+    * @param string $whereClause Standard filter conditions (e.g., "WHERE 1=1 AND status = 'active'").
+    * @param array $params Prepared statement bound values.
+    * @param string $orderBy SQL ORDER BY expression.
+    * @param int $pageNo Current page number.
+    * @param int $pageRow Number of items per page.
+    * @return array Standardized pagination response payload.
+    */
+    public static function paginate(
+        PDO $pdo,
+        string $baseQuery,
+        string $whereClause = 'WHERE 1=1',
+        array $params = [],
+        string $orderBy = '',
+        int $pageNo = 1,
+        int $pageRow = 10
+    ): array {
+        $useLimit = $pageNo > 0 && $pageRow > 0;
+
+        // 1. Calculate Total Matching Count
+        $countQuery = "SELECT COUNT(*) FROM ({$baseQuery} {$whereClause}) AS count_subquery";
+        $countStmt = $pdo->prepare($countQuery);
+        foreach ($params as $key => $val) {
+            $countStmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $countStmt->execute();
+        $totalItems = (int) $countStmt->fetchColumn();
+
+        // 2. Fetch Paginated Records
+        $query = "{$baseQuery} {$whereClause}";
+        if ($orderBy !== '') {
+            $query .= " {$orderBy}";
+        }
+
+        if ($useLimit) {
+            $offset = ($pageNo - 1) * $pageRow;
+            $query .= " LIMIT :limit OFFSET :offset";
+        }
+
+        $stmt = $pdo->prepare($query);
+        foreach ($params as $key => $val) {
+            $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+
+        if ($useLimit) {
+            $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        }
+
+        $stmt->execute();
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 3. Return Clean Pagination Payload
+        return [
+            'items'       => $items,
+            'total_items' => $totalItems,
+            'page_no'     => $pageNo,
+            'page_row'    => $pageRow
+        ];
+    }
 }

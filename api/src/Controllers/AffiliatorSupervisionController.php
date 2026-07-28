@@ -11,178 +11,186 @@ use PDO;
 class AffiliatorSupervisionController
 {
     /**
-     * Get active supervision registration details and documents.
-     */
-     public function get()
-         {
-             $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
+    * Get active supervision registration details and documents.
+    */
+    public function get()
+    {
+        $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
 
-             try {
-                 $pdo = Database::getConnection();
-                 $userId = $user['data']['id'];
-                 $roleName = strtolower($user['data']['role_name'] ?? '');
+        try {
+            $pdo = Database::getConnection();
+            $userId = $user['data']['id'];
+            $roleName = strtolower($user['data']['role_name'] ?? '');
 
-                 // 1. Resolve affiliator_id
-                 $affiliatorId = $_GET['affiliator_id'] ?? null;
+            // 1. Resolve affiliator_id
+            $affiliatorId = $_GET['affiliator_id'] ?? null;
 
-                 if ($affiliatorId === null && $roleName === 'affiliator') {
-                     $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
-                     $affStmt->execute(['user_id' => $userId]);
-                     $affRow = $affStmt->fetch();
-                     $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
-                 }
+            if ($affiliatorId === null && $roleName === 'affiliator') {
+                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
+                $affStmt->execute(['user_id' => $userId]);
+                $affRow = $affStmt->fetch();
+                $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
+            }
 
-                 // 2. Paginated List Branch
-                 if ($affiliatorId === null) {
-                     if ($roleName === "admin" || $roleName === "reviewer") {
-                         $filterField = $_GET['filter_field'] ?? "";
-                         $filterValue = $_GET['filter_value'] ?? "";
-                         $status = $_GET['status'] ?? "";
-                         $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
-                         $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
-                         $useLimit = $pageNo > 0 && $pageRow > 0;
+            // 2. Paginated List Branch
+            if ($affiliatorId === null) {
+                if ($roleName === "admin" || $roleName === "reviewer") {
+                    $filterField = $_GET['filter_field'] ?? "";
+                    $filterValue = $_GET['filter_value'] ?? "";
+                    $filterDate  = $_GET['filter_date'] ?? $_GET['date'] ?? ""; // Supports filter_date or date
+                    $isPosted    = $_GET['is_posted'] ?? "";
+                    $isReviewed  = $_GET['is_reviewed'] ?? "";
+                    $isApproved  = $_GET['is_approved'] ?? "";
+                    $pageNo      = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+                    $pageRow     = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+                    $useLimit    = $pageNo > 0 && $pageRow > 0;
 
-                         $where = 'WHERE 1=1';
-                         $params = [];
+                    $where = 'WHERE 1=1';
+                    $params = [];
 
-                         $allowedFields = [
-                             'hospital_name' => 'aff.affiliator_name',
-                             'pic_name'      => 'asup.pic_name',
-                             'status'        => 'asup.status'
-                         ];
+                    $allowedFields = [
+                        'hospital_name' => 'aff.affiliator_name',
+                        'pic_name'      => 'asup.pic_name'
+                    ];
 
-                         if ($filterField !== "" && $filterValue !== "" && isset($allowedFields[$filterField])) {
-                             $column = $allowedFields[$filterField];
-                             $where .= " AND {$column} ILIKE :val";
-                             $params['val'] = '%' . $filterValue . '%';
-                         } else if ($filterValue !== "") {
-                             $where .= " AND (aff.affiliator_name ILIKE :val OR asup.pic_name ILIKE :val)";
-                             $params['val'] = '%' . $filterValue . '%';
-                         }
+                    // Text search filter
+                    if ($filterField !== "" && $filterValue !== "" && isset($allowedFields[$filterField])) {
+                        $column = $allowedFields[$filterField];
+                        $where .= " AND {$column} ILIKE :val";
+                        $params['val'] = '%' . $filterValue . '%';
+                    } else if ($filterValue !== "") {
+                        $where .= " AND (aff.affiliator_name ILIKE :val OR asup.pic_name ILIKE :val)";
+                        $params['val'] = '%' . $filterValue . '%';
+                    }
 
-                         if ($status !== "" && $status !== "Semua") {
-                             $where .= " AND asup.status ILIKE :status";
-                             $params['status'] = $status;
-                         }
+                    // Date Filter (Matches updated_at / posted_date by date part)
+                    if ($filterDate !== "") {
+                        $where .= " AND DATE(asup.updated_at) = :filter_date";
+                        $params['filter_date'] = $filterDate;
+                    }
 
-                         // Count total distinct supervisions
-                         $countQuery = "
-                             SELECT COUNT(*)
-                             FROM affiliator_supervisions asup
-                             JOIN affiliators aff ON asup.affiliator_id = aff.id
-                             {$where}
-                         ";
-                         $countStmt = $pdo->prepare($countQuery);
-                         foreach ($params as $key => $val) {
-                             $countStmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
-                         }
-                         $countStmt->execute();
-                         $totalItems = (int)$countStmt->fetchColumn();
+                    // Status Filters
+                    if ($isPosted !== ""){
+                        $where .= " AND asup.is_posted = :is_posted";
+                        $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
+                    }
+                    if ($isReviewed !== ""){
+                        $where .= " AND asup.is_reviewed = :is_reviewed";
+                        $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+                    }
+                    if ($isApproved !== ""){
+                        $where .= " AND asup.is_approved = :is_approved";
+                        $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+                    }
 
-                         // Single Query with aggregated documents array via PostgreSQL json_agg
-                         $query = "
-                             SELECT
-                                 asup.*,
-                                 aff.affiliator_name AS hospital_name,
-                                 aff.affiliator_type AS institution_type,
-                                 aff.address,
-                                 COALESCE(
-                                     (
-                                         SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
-                                         FROM affiliator_supervision_documents doc
-                                         WHERE doc.supervision_id = asup.id
-                                     ), '[]'::json
-                                 ) AS documents
-                             FROM affiliator_supervisions asup
-                             JOIN affiliators aff ON asup.affiliator_id = aff.id
-                             {$where}
-                             ORDER BY asup.id DESC
-                         ";
+                    // Count total distinct supervisions
+                    $countQuery = "
+                        SELECT COUNT(*)
+                        FROM affiliator_supervisions asup
+                        JOIN affiliators aff ON asup.affiliator_id = aff.id
+                        {$where}
+                    ";
+                    $countStmt = $pdo->prepare($countQuery);
+                    foreach ($params as $key => $val) {
+                        $countStmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                    }
+                    $countStmt->execute();
+                    $totalItems = (int)$countStmt->fetchColumn();
 
-                         if ($useLimit) {
-                             $offset = ($pageNo - 1) * $pageRow;
-                             $query .= " LIMIT :limit OFFSET :offset";
-                         }
+                    // Single Query with aggregated documents array via PostgreSQL json_agg
+                    $query = "
+                        SELECT
+                            asup.*,
+                            asup.is_posted as is_posted,
+                            aff.affiliator_name,
+                            aff.affiliator_type,
+                            asup.updated_at as posted_date,
+                            aff.address,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
+                                    FROM affiliator_supervision_documents doc
+                                    WHERE doc.supervision_id = asup.id
+                                ), '[]'::json
+                            ) AS documents
+                        FROM affiliator_supervisions asup
+                        JOIN affiliators aff ON asup.affiliator_id = aff.id
+                        {$where}
+                        ORDER BY asup.id DESC
+                    ";
 
-                         $stmt = $pdo->prepare($query);
-                         foreach ($params as $key => $val) {
-                             $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
-                         }
-                         if ($useLimit) {
-                             $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
-                             $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-                         }
+                    if ($useLimit) {
+                        $offset = ($pageNo - 1) * $pageRow;
+                        $query .= " LIMIT :limit OFFSET :offset";
+                    }
 
-                         $stmt->execute();
-                         $supervisions = $stmt->fetchAll();
+                    $stmt = $pdo->prepare($query);
+                    foreach ($params as $key => $val) {
+                        $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                    }
+                    if ($useLimit) {
+                        $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+                    }
 
-                         // Decode JSON documents string returned by PostgreSQL
-                         foreach ($supervisions as &$sup) {
-                             $sup['documents'] = json_decode($sup['documents'] ?? '[]', true);
-                         }
+                    $stmt->execute();
+                    $supervisions = $stmt->fetchAll();
 
-                         $responseData = [
-                             'items'       => $supervisions,
-                             'total_items' => $totalItems,
-                             'page_no'     => $pageNo,
-                             'page_row'    => $pageRow
-                         ];
+                    // Decode JSON documents string returned by PostgreSQL
+                    foreach ($supervisions as &$sup) {
+                        $sup['documents'] = json_decode($sup['documents'] ?? '[]', true);
+                    }
 
-                         (new ApiResponse(true, 'All supervisions retrieved successfully', $responseData))->send(200);
-                     } else {
-                         (new ApiResponse(true, 'No affiliator associated', null))->send(200);
-                     }
-                 }
+                    $responseData = [
+                        'items'       => $supervisions,
+                        'total_items' => $totalItems,
+                        'page_no'     => $pageNo,
+                        'page_row'    => $pageRow
+                    ];
 
-                 // 3. Single Affiliator Detail Branch
-                 $stmt = $pdo->prepare("
-                     SELECT
-                         asup.*,
-                         aff.affiliator_name AS hospital_name,
-                         aff.affiliator_type AS institution_type,
-                         aff.address,
-                         COALESCE(
-                             (
-                                 SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
-                                 FROM affiliator_supervision_documents doc
-                                 WHERE doc.supervision_id = asup.id
-                             ), '[]'::json
-                         ) AS documents
-                     FROM affiliator_supervisions asup
-                     JOIN affiliators aff ON asup.affiliator_id = aff.id
-                     WHERE asup.affiliator_id = :affiliator_id
-                 ");
-                 $stmt->execute(['affiliator_id' => $affiliatorId]);
-                 $supervision = $stmt->fetch();
+                    (new ApiResponse(true, 'All supervisions retrieved successfully', $responseData))->send(200);
+                } else {
+                    (new ApiResponse(true, 'No affiliator associated', null))->send(200);
+                }
+            }
 
-                 if (!$supervision) {
-                     $affStmt = $pdo->prepare("SELECT * FROM affiliators WHERE id = :id");
-                     $affStmt->execute(['id' => $affiliatorId]);
-                     $aff = $affStmt->fetch();
+            // 3. Single Affiliator Detail Branch
+            $stmt = $pdo->prepare("
+                SELECT
+                    asup.*,
+                    aff.affiliator_name AS hospital_name,
+                    aff.affiliator_type AS institution_type,
+                    aff.address,
+                    COALESCE(
+                        (
+                            SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
+                            FROM affiliator_supervision_documents doc
+                            WHERE doc.supervision_id = asup.id
+                        ), '[]'::json
+                    ) AS documents
+                FROM affiliator_supervisions asup
+                JOIN affiliators aff ON asup.affiliator_id = aff.id
+                WHERE asup.affiliator_id = :affiliator_id
+            ");
+            $stmt->execute(['affiliator_id' => $affiliatorId]);
+            $supervision = $stmt->fetch();
 
-                     $defaultData = [
-                         'id'               => null,
-                         'affiliator_id'    => $affiliatorId,
-                         'pic_name'         => '',
-                         'status'           => 'draft',
-                         'review_notes'     => null,
-                         'hospital_name'    => $aff ? $aff['affiliator_name'] : '',
-                         'institution_type' => $aff ? $aff['affiliator_type'] : '',
-                         'address'          => $aff ? $aff['address'] : '',
-                         'documents'        => []
-                     ];
-                     (new ApiResponse(true, 'No supervision progress found, returning profile defaults', $defaultData))->send(200);
-                 }
+            if (!$supervision) {
+                $affStmt = $pdo->prepare("SELECT * FROM affiliators WHERE id = :id");
+                $affStmt->execute(['id' => $affiliatorId]);
+                $aff = $affStmt->fetch();
 
-                 $supervision['documents'] = json_decode($supervision['documents'] ?? '[]', true);
+                (new ApiResponse(true, 'No supervision progress found, returning profile defaults', null))->send(200);
+            }
 
-                 (new ApiResponse(true, 'Supervision details retrieved successfully', $supervision))->send(200);
-             } catch (\Throwable $e) {
-                 (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
-             }
-         }    /**
-     * Upsert supervision registration application progress.
-     */
+            $supervision['documents'] = json_decode($supervision['documents'] ?? '[]', true);
+
+            (new ApiResponse(true, 'Supervision details retrieved successfully', $supervision))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
     public function post()
     {
         $user = AuthMiddleware::authorize(['affiliator']);
@@ -190,9 +198,8 @@ class AffiliatorSupervisionController
         try {
             $pdo = Database::getConnection();
             $userId = $user['data']['id'];
-            $data = $_POST; // Read from $_POST directly as request carries multipart/form-data for uploads
+            $data = $_POST;
 
-            // 1. Resolve affiliator_id
             $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
             $affStmt->execute(['user_id' => $userId]);
             $affRow = $affStmt->fetch();
@@ -203,30 +210,35 @@ class AffiliatorSupervisionController
             }
 
             $picName = trim($data['pic_name'] ?? '');
-            $status = trim($data['status'] ?? 'draft');
+            $isPosted = $data['is_posted'] == '1' ? 'true' : 'false';
 
-            if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
-                (new ApiResponse(false, 'Invalid status.'))->send(400);
-            }
+            $referenceId = Database::fetchColumn("
+                SELECT 'EA-RS-' || TO_CHAR(CURRENT_DATE, 'YYYYMM')
+                    || '-'
+                    || LPAD((COUNT(*) + 1)::text, 4, '0') AS reference_id
+                FROM affiliator_supervisions
+            ");
 
             // 2. Perform UPSERT on supervision metadata
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_supervisions (affiliator_id, pic_name, status, created_by, updated_by, created_at, updated_at)
-                VALUES (:affiliator_id, :pic_name, :status, :user_id, :user_id, NOW(), NOW())
+                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, created_by, updated_by, created_at, updated_at)
+                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, :user_id, :user_id, NOW(), NOW())
                 ON CONFLICT (affiliator_id)
                 DO UPDATE SET
                     pic_name = EXCLUDED.pic_name,
-                    status = EXCLUDED.status,
+                    is_posted = EXCLUDED.is_posted,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
                 RETURNING *
             ");
             $stmt->execute([
+                'reference_id' => $referenceId,
                 'affiliator_id' => $affiliatorId,
                 'pic_name' => $picName,
-                'status' => $status,
+                'is_posted' => $isPosted,
                 'user_id' => $userId
             ]);
+
             $supervision = $stmt->fetch();
             $supervisionId = $supervision['id'];
 
@@ -319,61 +331,61 @@ class AffiliatorSupervisionController
     /**
      * Update supervision review status and notes by admin.
      */
-     public function review()
-     {
-         $user = AuthMiddleware::authorize(['admin', 'reviewer']);
+    public function review()
+    {
+        $user = AuthMiddleware::authorize(['admin', 'reviewer']);
 
-         try {
-             $pdo = Database::getConnection();
-             $data = RequestHelper::getBody();
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
 
-             $id = $data['id'] ?? null;
-             $status = trim($data['status'] ?? '');
-             $reviewNotes = trim($data['review_notes'] ?? '');
+            $id = $data['id'] ?? null;
+            $status = trim($data['status'] ?? '');
+            $reviewNotes = trim($data['review_notes'] ?? '');
 
-             if ($id === null || empty($status)) {
-                 (new ApiResponse(false, 'Supervision ID and Status are required'))->send(400);
-                 return;
-             }
+            if ($id === null || empty($status)) {
+                (new ApiResponse(false, 'Supervision ID and Status are required'))->send(400);
+                return;
+            }
 
-             if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
-                 (new ApiResponse(false, 'Invalid status.'))->send(400);
-                 return;
-             }
+            if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
+                (new ApiResponse(false, 'Invalid status.'))->send(400);
+                return;
+            }
 
-             $userId = $user['data']['id'];
+            $userId = $user['data']['id'];
 
-             $stmt = $pdo->prepare("
-                 UPDATE affiliator_supervisions
-                 SET status = :status::varchar,
-                     review_notes = :review_notes,
-                     approved_by = CASE WHEN :status_check::varchar IN ('approved', 'active') THEN :approved_user_id::integer ELSE approved_by END,
-                     approved_at = CASE WHEN :status_check2::varchar IN ('approved', 'active') THEN NOW() ELSE approved_at END,
-                     updated_by = :user_id::integer,
-                     updated_at = NOW()
-                 WHERE id = :id::integer
-                 RETURNING *
-             ");
+            $stmt = $pdo->prepare("
+                UPDATE affiliator_supervisions
+                SET status = :status::varchar,
+                    review_notes = :review_notes,
+                    approved_by = CASE WHEN :status_check::varchar IN ('approved', 'active') THEN :approved_user_id::integer ELSE approved_by END,
+                    approved_at = CASE WHEN :status_check2::varchar IN ('approved', 'active') THEN NOW() ELSE approved_at END,
+                    updated_by = :user_id::integer,
+                    updated_at = NOW()
+                WHERE id = :id::integer
+                RETURNING *
+            ");
 
-             $stmt->bindValue(':status', $status, PDO::PARAM_STR);
-             $stmt->bindValue(':status_check', $status, PDO::PARAM_STR);
-             $stmt->bindValue(':status_check2', $status, PDO::PARAM_STR);
-             $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-             $stmt->bindValue(':approved_user_id', $userId, PDO::PARAM_INT);
-             $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
-             $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':status_check', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':status_check2', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $stmt->bindValue(':approved_user_id', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
 
-             $stmt->execute();
-             $result = $stmt->fetch();
+            $stmt->execute();
+            $result = $stmt->fetch();
 
-             if (!$result) {
-                 (new ApiResponse(false, 'Supervision registration record not found.'))->send(404);
-                 return;
-             }
+            if (!$result) {
+                (new ApiResponse(false, 'Supervision registration record not found.'))->send(404);
+                return;
+            }
 
-             (new ApiResponse(true, 'Supervision status updated successfully', $result))->send(200);
-         } catch (\Throwable $e) {
-             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
-         }
-     }
+            (new ApiResponse(true, 'Supervision status updated successfully', $result))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }
