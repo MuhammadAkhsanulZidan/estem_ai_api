@@ -7,14 +7,20 @@ CREATE TABLE adverse_events (
     patient_id INT NOT NULL REFERENCES patient_ecrfs(id) ON DELETE CASCADE,
     protocol_id INT NOT NULL REFERENCES admin_protocols(id) ON DELETE CASCADE,
     event_type VARCHAR(255) NOT NULL,
+<<<<<<< HEAD
     severity INT NOT NULL, -- Ringan, Sedang, Serius (SAE)
     is_posted BOOLEAN NOT NULL DEFAULT FALSE,
     is_revised BOOLEAN NOT NULL DEFAULT FALSE,
     is_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
     is_approved BOOLEAN NOT NULL DEFAULT FALSE,
+=======
+    severity VARCHAR(50) NOT NULL, -- Ringan, Sedang, Serius (SAE)
+    status VARCHAR(50) NOT NULL DEFAULT 'Submitted', -- Submitted, Dalam Review, Need Clarification, Need Revision, Approved, Ditolak
+>>>>>>> fd21a59a39c3cc13215a32faee018b8b647cfb96
     action_taken TEXT,
     reporter_name VARCHAR(150),
     report_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewer_note TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users(id),
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
