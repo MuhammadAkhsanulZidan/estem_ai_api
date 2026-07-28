@@ -228,9 +228,9 @@ class AffiliatorSupervisionController
                     return;
                 }
                 $referenceId = $existing['reference_id'];
-            } else {
                 $yearMonth = date('Ym');
-                $count = (int)Database::fetchColumn("SELECT COUNT(*) FROM affiliator_supervisions") + 1;
+                $countQuery = $pdo->query("SELECT COUNT(*) FROM affiliator_supervisions");
+                $count = (int)$countQuery->fetchColumn() + 1;
                 $referenceId = sprintf("EA-RS-%s-%04d", $yearMonth, $count);
             }
 
