@@ -213,24 +213,21 @@ class AffiliatorSupervisionController
             $pdo->exec("ALTER TABLE affiliator_supervisions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft'");
 
             $picName = trim($data['pic_name'] ?? '');
-
+            
             $status = trim($data['status'] ?? 'draft');
             $isPosted = ($status === 'submitted') ? 'true' : 'false';
 
             // Check if record exists
-            $checkStmt = $pdo->prepare("SELECT reference_id, is_posted, is_revised, is_approved FROM affiliator_supervisions WHERE affiliator_id = :affiliator_id");
+            $checkStmt = $pdo->prepare("SELECT reference_id, is_posted FROM affiliator_supervisions WHERE affiliator_id = :affiliator_id");
             $checkStmt->execute(['affiliator_id' => $affiliatorId]);
             $existing = $checkStmt->fetch();
 
             if ($existing) {
-                $isRevised = (bool)$existing['is_revised'];
-                $isApproved = (bool)$existing['is_approved'];
-                if ($existing['is_posted'] && !($isRevised && !$isApproved)) {
+                if ($existing['is_posted']) {
                     (new ApiResponse(false, 'Pengajuan pengampuan telah dikirim dan tidak dapat diubah.'))->send(400);
                     return;
                 }
                 $referenceId = $existing['reference_id'];
-            } else {
                 $yearMonth = date('Ym');
                 $countQuery = $pdo->query("SELECT COUNT(*) FROM affiliator_supervisions");
                 $count = (int)$countQuery->fetchColumn() + 1;
@@ -243,11 +240,9 @@ class AffiliatorSupervisionController
                 VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, :status, :user_id, :user_id, NOW(), NOW())
                 ON CONFLICT (affiliator_id)
                 DO UPDATE SET
-                    pic_name = CASE WHEN EXCLUDED.pic_name = '' THEN affiliator_supervisions.pic_name ELSE EXCLUDED.pic_name END,
+                    pic_name = EXCLUDED.pic_name,
                     is_posted = EXCLUDED.is_posted,
                     status = EXCLUDED.status,
-                    is_revised = false,
-                    is_reviewed = false,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW()
                 RETURNING *
