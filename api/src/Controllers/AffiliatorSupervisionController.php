@@ -365,7 +365,7 @@ class AffiliatorSupervisionController
                 return;
             }
 
-            if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active'])) {
+            if (!in_array($status, ['draft', 'submitted', 'review', 'revision', 'approved', 'active', 'rejected'])) {
                 (new ApiResponse(false, 'Invalid status.'))->send(400);
                 return;
             }
@@ -376,8 +376,12 @@ class AffiliatorSupervisionController
                 UPDATE affiliator_supervisions
                 SET status = :status::varchar,
                     review_notes = :review_notes,
-                    approved_by = CASE WHEN :status_check::varchar IN ('approved', 'active') THEN :approved_user_id::integer ELSE approved_by END,
-                    approved_at = CASE WHEN :status_check2::varchar IN ('approved', 'active') THEN NOW() ELSE approved_at END,
+                    is_approved = CASE WHEN :status_check1::varchar IN ('approved', 'active') THEN true ELSE false END,
+                    is_reviewed = true,
+                    is_revised = CASE WHEN :status_check2::varchar = 'revision' THEN true ELSE false END,
+                    is_posted = CASE WHEN :status_check3::varchar = 'draft' THEN false ELSE true END,
+                    approved_by = CASE WHEN :status_check4::varchar IN ('approved', 'active') THEN :approved_user_id::integer ELSE approved_by END,
+                    approved_at = CASE WHEN :status_check5::varchar IN ('approved', 'active') THEN NOW() ELSE approved_at END,
                     updated_by = :user_id::integer,
                     updated_at = NOW()
                 WHERE id = :id::integer
@@ -385,8 +389,11 @@ class AffiliatorSupervisionController
             ");
 
             $stmt->bindValue(':status', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':status_check', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':status_check1', $status, PDO::PARAM_STR);
             $stmt->bindValue(':status_check2', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':status_check3', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':status_check4', $status, PDO::PARAM_STR);
+            $stmt->bindValue(':status_check5', $status, PDO::PARAM_STR);
             $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':approved_user_id', $userId, PDO::PARAM_INT);
             $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
