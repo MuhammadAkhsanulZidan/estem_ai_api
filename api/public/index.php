@@ -103,6 +103,7 @@ try {
     $router->post('/v1/reviewer/patient-ecrfs/review', [PatientEcrfController::class, 'postReview']);
     $router->get('/v1/patients', [PatientController::class, 'get']);
     $router->post('/v1/patients', [PatientController::class, 'post']);
+    $router->put('/v1/patients', [PatientController::class, 'put']);
     $router->get('/v1/patients/next-registration-number', [PatientController::class, 'getNextRegistrationNumber']);
 
     $router->get('/v1/adverse-events', [AdverseEventController::class, 'get']);

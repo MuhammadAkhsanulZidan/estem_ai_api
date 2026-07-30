@@ -167,5 +167,64 @@ class PatientController
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
+    /**
+     * Update an existing patient record.
+     */
+    public function put()
+    {
+        $user = AuthMiddleware::authorize(['affiliator']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $_GET['id'] ?? $data['id'] ?? null;
+            if ($id === null) {
+                (new ApiResponse(false, 'ID Pasien wajib diisi'))->send(400);
+                return;
+            }
+
+            $protocolId = $data['protocol_id'] ?? null;
+            $patientInitial = trim($data['patient_initial'] ?? '');
+            $gender = trim($data['gender'] ?? '');
+            $picDoctor = trim($data['pic_doctor'] ?? '');
+            $birthDate = !empty($data['birth_date']) ? $data['birth_date'] : null;
+            $registrationDate = !empty($data['registration_date']) ? $data['registration_date'] : null;
+
+            if (empty($protocolId) || empty($patientInitial)) {
+                (new ApiResponse(false, 'protocol_id and patient_initial are required'))->send(400);
+                return;
+            }
+
+            $stmt = $pdo->prepare("
+                UPDATE patient_ecrfs
+                SET protocol_id = :protocol_id,
+                    patient_initial = :patient_initial,
+                    gender = :gender,
+                    pic_doctor = :pic_doctor,
+                    birth_date = :birth_date,
+                    registration_date = :registration_date,
+                    updated_by = :user_id,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING *
+            ");
+
+            $stmt->bindValue(':protocol_id', $protocolId, PDO::PARAM_INT);
+            $stmt->bindValue(':patient_initial', $patientInitial, PDO::PARAM_STR);
+            $stmt->bindValue(':gender', $gender, PDO::PARAM_STR);
+            $stmt->bindValue(':pic_doctor', $picDoctor, PDO::PARAM_STR);
+            $stmt->bindValue(':birth_date', $birthDate, $birthDate === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $stmt->bindValue(':registration_date', $registrationDate, $registrationDate === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $stmt->bindValue(':user_id', $user['data']['id'], PDO::PARAM_INT);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+
+            $stmt->execute();
+            $updated = $stmt->fetch();
+
+            (new ApiResponse(true, 'Pasien berhasil diperbarui', $updated))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
     }
 }
