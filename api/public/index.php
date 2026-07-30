@@ -53,6 +53,7 @@ use App\Controllers\PatientEcrfController;
 use App\Controllers\PatientController;
 use App\Controllers\AffiliatorProfileController;
 use App\Controllers\AdverseEventController;
+use App\Controllers\ChatbotController;
 
 try {
     $router = new Router();
@@ -119,6 +120,8 @@ try {
     $router->post('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'post']);
     $router->put('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'put']);
     $router->delete('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'delete']);
+
+    $router->post('/v1/chat', [ChatbotController::class, 'chat']);
 
 // Parse path to remove query parameters
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);

@@ -94,7 +94,7 @@ class Database
     /**
     * Base method that prepares and executes any SQL query.
     */
-    public static function execute(string $sql, array $params = []): PDOStatement
+    public static function execute(string $sql, array $params = []): \PDOStatement
     {
         $stmt = self::getConnection()->prepare($sql);
         $stmt->execute($params);
