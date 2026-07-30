@@ -32,7 +32,7 @@ class AuthController {
                 LEFT JOIN roles AS r ON u.role_id = r.id
                 WHERE username = :username
                 AND u.role_id = :role_id
-                AND u.is_active = TRUE
+                AND u.is_approved = TRUE
             ");
 
             $stmt->execute(['username' => $username, 'role_id' => $roleId]);
