@@ -27,7 +27,7 @@ class PatientEcrfController
                 (new ApiResponse(false, 'Patient ID and Protocol ID are required'))->send(400);
             }
 
-            // 1. Fetch eCRF template sections
+            // 1. Fetch eCRF template sections using admin protocol questions
             $stmt = $pdo->prepare("
                 SELECT
                     es.id AS section_id,
@@ -35,7 +35,11 @@ class PatientEcrfController
                     ape.questions_schema
                 FROM ecrf_sections es
                 LEFT JOIN admin_protocol_ecrfs ape
-                    ON es.id = ape.section_id AND ape.protocol_id = :protocol_id
+                    ON es.id = ape.section_id AND ape.protocol_id = (
+                        SELECT protocol_reference_id 
+                        FROM affiliator_protocols 
+                        WHERE id = :protocol_id
+                    )
                 ORDER BY es.id ASC
             ");
             $stmt->execute(['protocol_id' => $protocolId]);
@@ -164,7 +168,15 @@ class PatientEcrfController
 
             // 2. Perform validations if is_posted is true
             if ($isPosted) {
-                $tStmt = $pdo->prepare("SELECT questions_schema FROM admin_protocol_ecrfs WHERE protocol_id = :protocol_id AND section_id = :section_id");
+                $tStmt = $pdo->prepare("
+                    SELECT questions_schema 
+                    FROM admin_protocol_ecrfs 
+                    WHERE section_id = :section_id AND protocol_id = (
+                        SELECT protocol_reference_id 
+                        FROM affiliator_protocols 
+                        WHERE id = :protocol_id
+                    )
+                ");
                 $tStmt->execute(['protocol_id' => $protocolId, 'section_id' => $sectionId]);
                 $tRow = $tStmt->fetch();
                 $questions = $tRow ? json_decode($tRow['questions_schema'] ?? '[]', true) : [];
