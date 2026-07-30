@@ -48,22 +48,22 @@ BEGIN
         ELSE
             initial := upper(substring(words[1] from 1 for 2));
         END IF;
-        
+
         -- Clean to keep only alphanumeric character
         initial := regexp_replace(initial, '[^A-Z0-9]', '', 'g');
         IF initial = '' THEN
             initial := 'AF';
         END IF;
-        
+
         base_code := initial;
         new_code := base_code;
-        
+
         -- Loop to resolve duplicate keys
         WHILE EXISTS (SELECT 1 FROM affiliators WHERE affiliator_code = new_code) LOOP
             new_code := base_code || '-' || counter;
             counter := counter + 1;
         END LOOP;
-        
+
         NEW.affiliator_code := new_code;
     END IF;
     RETURN NEW;
