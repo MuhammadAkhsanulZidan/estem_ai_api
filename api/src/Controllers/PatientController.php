@@ -123,7 +123,7 @@ class PatientController
 
             $stmt = $pdo->prepare("
                 INSERT INTO patient_ecrfs (affiliator_id, protocol_id, registration_number, patient_initial, gender, pic_doctor, birth_date, registration_date, created_by, updated_by, created_at, updated_at)
-                VALUES (:affiliator_id, :protocol_id, :registration_number, :patient_initial, :gender, :pic_doctor, :birth_date, :registration_date, :user_id, :user_id, NOW(), NOW())
+                VALUES (:affiliator_id, :protocol_id, :registration_number, :patient_initial, :gender, :pic_doctor, :birth_date, :registration_date, :created_by, :updated_by, NOW(), NOW())
                 RETURNING *
             ");
 
@@ -135,7 +135,8 @@ class PatientController
             $stmt->bindValue(':pic_doctor', $picDoctor, PDO::PARAM_STR);
             $stmt->bindValue(':birth_date', $birthDate, $birthDate === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':registration_date', $registrationDate, PDO::PARAM_STR);
-            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':created_by', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':updated_by', $userId, PDO::PARAM_INT);
 
             $stmt->execute();
             $newPatient = $stmt->fetch();
