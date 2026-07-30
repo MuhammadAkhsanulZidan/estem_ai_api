@@ -46,17 +46,23 @@ class PatientController
                 SELECT * FROM (
                     SELECT
                         pe.*,
-                        COALESCE(aff_ap.protocol_name, ap.protocol_name) AS protocol_name,
+                        aff_ap.protocol_name,
+                        ap.protocol_name AS source_protocol_name,
                         COALESCE(aff_ap.protocol_version, ap.protocol_version) AS protocol_version,
                         COALESCE(aff_ap.indication, ap.indication) AS protocol_indication
                     FROM patient_ecrfs pe
                     JOIN admin_protocols ap ON pe.protocol_id = ap.id
-                    LEFT JOIN affiliator_protocols aff_ap ON pe.protocol_id = aff_ap.protocol_reference_id AND pe.affiliator_id = aff_ap.affiliator_id
+                    LEFT JOIN affiliator_protocols aff_ap ON aff_ap.id = (
+                        SELECT MAX(sub_ap.id)
+                        FROM affiliator_protocols sub_ap
+                        WHERE sub_ap.protocol_reference_id = pe.protocol_id
+                          AND sub_ap.affiliator_id = pe.affiliator_id
+                    )
                     ORDER BY pe.id DESC
                 ) A
             ";
 
-            $tableName = "(SELECT pe.*, COALESCE(aff_ap.protocol_name, ap.protocol_name) AS protocol_name FROM patient_ecrfs pe JOIN admin_protocols ap ON pe.protocol_id = ap.id LEFT JOIN affiliator_protocols aff_ap ON pe.protocol_id = aff_ap.protocol_reference_id AND pe.affiliator_id = aff_ap.affiliator_id) A";
+            $tableName = "(SELECT pe.*, aff_ap.protocol_name FROM patient_ecrfs pe JOIN admin_protocols ap ON pe.protocol_id = ap.id LEFT JOIN affiliator_protocols aff_ap ON aff_ap.id = (SELECT MAX(sub_ap.id) FROM affiliator_protocols sub_ap WHERE sub_ap.protocol_reference_id = pe.protocol_id AND sub_ap.affiliator_id = pe.affiliator_id)) A";
             $queryWhere = "";
             $params = [];
 
