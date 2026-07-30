@@ -21,6 +21,7 @@ CREATE TABLE affiliators (
     other_labor_number  INT,
     research_head   VARCHAR(100),
     reasearch_head_contact  VARCHAR(100),
+    affiliator_code VARCHAR(50) UNIQUE,
     created_at TIMESTAMP DEFAULT NOW(),
     create_by  BIGINT,
     updated_at TIMESTAMP DEFAULT NOW(),

@@ -97,8 +97,13 @@ class PatientController
                 (new ApiResponse(false, 'protocol_id and patient_initial are required'))->send(400);
             }
 
+            // Fetch affiliator_code
+            $stmtCode = $pdo->prepare("SELECT affiliator_code FROM affiliators WHERE id = :id");
+            $stmtCode->execute(['id' => $affiliatorId]);
+            $affiliatorCode = $stmtCode->fetchColumn() ?: 'UNK';
+
             // Generate registration number dynamically
-            $prefix = "RP-" . date('ymd') . "-" . $affiliatorId . "-";
+            $prefix = $affiliatorCode . "/RP/" . date('ymd') . "/";
             $countStmt = $pdo->prepare("SELECT COUNT(*) FROM patient_ecrfs WHERE registration_number LIKE :prefix");
             $countStmt->execute(['prefix' => $prefix . '%']);
             $count = (int)$countStmt->fetchColumn();
@@ -145,7 +150,12 @@ class PatientController
                 (new ApiResponse(false, 'Akun pengguna tidak terasosiasi dengan institusi faskes'))->send(400);
             }
 
-            $prefix = "RP-" . date('ymd') . "-" . $affiliatorId . "-";
+            // Fetch affiliator_code
+            $stmtCode = $pdo->prepare("SELECT affiliator_code FROM affiliators WHERE id = :id");
+            $stmtCode->execute(['id' => $affiliatorId]);
+            $affiliatorCode = $stmtCode->fetchColumn() ?: 'UNK';
+
+            $prefix = $affiliatorCode . "/RP/" . date('ymd') . "/";
             $countStmt = $pdo->prepare("SELECT COUNT(*) FROM patient_ecrfs WHERE registration_number LIKE :prefix");
             $countStmt->execute(['prefix' => $prefix . '%']);
             $count = (int)$countStmt->fetchColumn();
