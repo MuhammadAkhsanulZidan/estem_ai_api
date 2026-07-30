@@ -38,40 +38,44 @@ class AffiliatorProtocolController
 
                 if (!$protocol) {
                     (new ApiResponse(false, 'Protocol not found'))->send(404);
-                    return; // Prevent execution from continuing
+                    return;
                 }
 
                 $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
                 $protocol['status_id'] = StatusHelper::resolveStatus($protocol);
 
                 (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
-            } else {
-                $where = '';
-                $params = [];
-                $isPosted   = $_GET['is_posted'] ?? "";
-                $isRevised  = $_GET['is_revised'] ?? "";
-                $isReviewed = $_GET['is_reviewed'] ?? "";
-                $isApproved = $_GET['is_approved'] ?? "";
+                return;
+            }
 
-                // Status Filters
-                if ($isPosted !== ""){
-                    $where .= " AND is_posted = :is_posted";
-                    $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
-                }
-                if ($isReviewed !== ""){
-                    $where .= " AND is_reviewed = :is_reviewed";
-                    $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
-                }
-                if ($isRevised !== ""){
-                    $where .= " AND is_revised = :is_revised";
-                    $params['is_revised'] = ($isRevised === "1" || $isRevised === "true") ? 'true' : 'false';
-                }
-                if ($isApproved !== ""){
-                    $where .= " AND is_approved = :is_approved"; // Fixed table alias to ap
-                    $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
-                }
+            $where = '';
+            $params = [];
+            $isPosted   = $_GET['is_posted'] ?? "";
+            $isRevised  = $_GET['is_revised'] ?? "";
+            $isReviewed = $_GET['is_reviewed'] ?? "";
+            $isApproved = $_GET['is_approved'] ?? "";
 
-                $query = "
+            // Status Filters
+            if ($isPosted !== ""){
+                $where .= " AND is_posted = :is_posted";
+                $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
+            }
+            if ($isReviewed !== ""){
+                $where .= " AND is_reviewed = :is_reviewed";
+                $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+            }
+            if ($isRevised !== ""){
+                $where .= " AND is_revised = :is_revised";
+                $params['is_revised'] = ($isRevised === "1" || $isRevised === "true") ? 'true' : 'false';
+            }
+            if ($isApproved !== ""){
+                $where .= " AND is_approved = :is_approved";
+                $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+            }
+
+            // Base subquery wrapped to make 'affiliator_name' directly filterable by pagination helper
+            $query = "
+                SELECT * FROM (
                     SELECT
                         ap.*, aff.affiliator_name,
                         COALESCE(
@@ -84,26 +88,30 @@ class AffiliatorProtocolController
                     FROM affiliator_protocols ap
                     LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
                     ORDER BY ap.id DESC
-                ";
+                ) A
+            ";
 
-                $responseData = RequestHelper::paginate(
-                    pdo: $pdo,
-                    query: $query,
-                    tableName: 'affiliator_protocols ap',
-                    queryWhere: $where,
-                    params: $params,
-                    filterFields: ['protocol_name'],
-                    mutateItems: function ($items) {
-                        foreach ($items as &$p) {
-                            $p['documents'] = json_decode($p['documents'] ?? '[]', true);
-                            $p['status_id'] = StatusHelper::resolveStatus($p);
-                        }
-                        return $items;
+            // Pass subquery as target table so count query also sees 'affiliator_name'
+            $subqueryTable = "(SELECT ap.*, aff.affiliator_name FROM affiliator_protocols ap LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id) A";
+
+            $responseData = RequestHelper::paginate(
+                pdo: $pdo,
+                query: $query,
+                tableName: $subqueryTable,
+                queryWhere: $where,
+                params: $params,
+                filterFields: ['protocol_name', 'affiliator_name'], // Fixed: array of separate strings
+                mutateItems: function ($items) {
+                    foreach ($items as &$p) {
+                        $p['documents'] = json_decode($p['documents'] ?? '[]', true);
+                        $p['status_id'] = StatusHelper::resolveStatus($p);
                     }
-                );
+                    return $items;
+                }
+            );
 
-                (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
-            }
+            (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
+
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
