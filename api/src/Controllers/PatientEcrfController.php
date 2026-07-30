@@ -240,9 +240,21 @@ class PatientEcrfController
             $status = $_GET['status'] ?? "Semua"; // Semua, submitted, review, revision, approved, rejected
             $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
             $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+            $startDate = $_GET['start_date'] ?? "";
+            $endDate = $_GET['end_date'] ?? "";
 
             $where = "WHERE per.is_posted = TRUE OR (per.is_posted = FALSE AND per.reviewer_note IS NOT NULL AND per.reviewer_note != '')";
             $params = [];
+
+            // Apply date filters
+            if ($startDate !== "") {
+                $where .= " AND per.updated_at >= :start_date";
+                $params['start_date'] = $startDate . ' 00:00:00';
+            }
+            if ($endDate !== "") {
+                $where .= " AND per.updated_at <= :end_date";
+                $params['end_date'] = $endDate . ' 23:59:59';
+            }
 
             // Apply search term filter
             if ($searchTerm !== "") {
@@ -348,7 +360,7 @@ class PatientEcrfController
             $data = RequestHelper::getBody();
 
             $id = $data['id'] ?? null;
-            $decision = trim($data['decision'] ?? ''); // approve, revision, reject
+            $decision = trim($data['decision'] ?? ''); // approve, revision
             $reviewerNote = trim($data['reviewer_note'] ?? '');
 
             if ($id === null || empty($decision)) {
@@ -364,16 +376,19 @@ class PatientEcrfController
                 (new ApiResponse(false, 'eCRF response record not found'))->send(404);
             }
 
-            $isApproved = ($decision === 'approve');
-            $isPosted = ($decision !== 'reject'); // Set is_posted to false if rejected, allowing reload
+            $userId = $user['data']['id'];
 
-            $isApprovedStr = $isApproved ? 'true' : 'false';
-            $isPostedStr = $isPosted ? 'true' : 'false';
+            $isApproved = ($decision === 'approve');
+            $isPosted = true; // Always remains posted/submitted in both Approve and Revision states
+            $isReviewed = true;
+            $isRevised = ($decision === 'revision');
 
             $updateStmt = $pdo->prepare("
                 UPDATE patient_ecrf_responses
                 SET is_approved = :is_approved,
                     is_posted = :is_posted,
+                    is_reviewed = :is_reviewed,
+                    is_revised = :is_revised,
                     reviewer_note = :reviewer_note,
                     approved_by = CASE WHEN :is_approved = TRUE THEN :user_id ELSE approved_by END,
                     approved_at = CASE WHEN :is_approved = TRUE THEN NOW() ELSE approved_at END,
@@ -383,22 +398,15 @@ class PatientEcrfController
                 RETURNING *
             ");
 
-            // FIX: Pass parameters array directly to execute()
             $updateStmt->execute([
-                'is_approved'   => $isApprovedStr,
-                'is_posted'     => $isPostedStr,
+                'is_approved'   => $isApproved ? 'true' : 'false',
+                'is_posted'     => $isPosted ? 'true' : 'false',
+                'is_reviewed'   => $isReviewed ? 'true' : 'false',
+                'is_revised'    => $isRevised ? 'true' : 'false',
                 'reviewer_note' => $reviewerNote === '' ? null : $reviewerNote,
                 'user_id'       => $userId,
                 'id'            => $id,
             ]);
-            $result = $updateStmt->fetch();
-            $updateStmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
-            $updateStmt->bindValue(':is_posted', $isPosted, PDO::PARAM_BOOL);
-            $updateStmt->bindValue(':reviewer_note', $reviewerNote === '' ? null : $reviewerNote, $reviewerNote === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-            $updateStmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
-            $updateStmt->bindValue(':id', $id, PDO::PARAM_INT);
-
-            $updateStmt->execute();
             $result = $updateStmt->fetch();
 
             (new ApiResponse(true, 'Review decision saved successfully', $result))->send(200);
