@@ -140,39 +140,9 @@ class AffiliatorController
             $isApproved = $isAdmin;
             $isReviewed = $isAdmin;
 
-            // Generate affiliator_code: first initial + last initial of name, e.g. "Hasan Sadikin" -> "HS"
-            $words = array_filter(explode(' ', $name));
-            if (count($words) >= 2) {
-                $firstWord = reset($words);
-                $lastWord = end($words);
-                $initial = strtoupper(substr($firstWord, 0, 1) . substr($lastWord, 0, 1));
-            } else {
-                $singleWord = reset($words);
-                $initial = strtoupper(substr($singleWord, 0, 2));
-            }
-
-            // Clean initial to only alphanumeric
-            $initial = preg_replace('/[^A-Z0-9]/', '', $initial);
-            if (empty($initial)) {
-                $initial = 'AF';
-            }
-
-            // Check duplicate in DB and append counter if duplicate
-            $affiliatorCode = $initial;
-            $counter = 1;
-            while (true) {
-                $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM affiliators WHERE affiliator_code = :code");
-                $checkStmt->execute(['code' => $affiliatorCode]);
-                if ((int)$checkStmt->fetchColumn() === 0) {
-                    break;
-                }
-                $affiliatorCode = $initial . "-" . $counter;
-                $counter++;
-            }
-
             $stmt = $pdo->prepare("
-                INSERT INTO affiliators (affiliator_name, affiliator_type, address, contact_phone, contact_email, director_name, operational_number, bed_number, is_approved, is_reviewed, affiliator_code, created_at, updated_at)
-                VALUES (:name, :type, :address, :phone, :email, :director_name, :operational_number, :bed_number, :is_approved, :is_reviewed, :affiliator_code, NOW(), NOW())
+                INSERT INTO affiliators (affiliator_name, affiliator_type, address, contact_phone, contact_email, director_name, operational_number, bed_number, is_approved, is_reviewed, created_at, updated_at)
+                VALUES (:name, :type, :address, :phone, :email, :director_name, :operational_number, :bed_number, :is_approved, :is_reviewed, NOW(), NOW())
                 RETURNING *
             ");
 
@@ -186,7 +156,6 @@ class AffiliatorController
             $stmt->bindValue(':bed_number', $bedNumber, $bedNumber === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
-            $stmt->bindValue(':affiliator_code', $affiliatorCode, PDO::PARAM_STR);
 
             $stmt->execute();
             $newAffiliator = $stmt->fetch();
