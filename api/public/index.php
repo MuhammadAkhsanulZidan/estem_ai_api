@@ -77,6 +77,7 @@ try {
     $router->get('/v1/affiliators', [AffiliatorController::class, 'get']);
     $router->post('/v1/affiliators', [AffiliatorController::class, 'post']);
     $router->put('/v1/affiliators', [AffiliatorController::class, 'put']);
+    $router->post('/v1/affiliators/review', [AffiliatorController::class, 'review_affiliator']);
     $router->delete('/v1/affiliators', [AffiliatorController::class, 'delete']);
 
     $router->get('/v1/affiliator/profile', [AffiliatorProfileController::class, 'get']);

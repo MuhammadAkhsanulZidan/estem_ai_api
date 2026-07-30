@@ -139,7 +139,6 @@ class UserController
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
             $affiliatorId = $data['affiliator_id'] ?? null;
-            $reviewerId = $data['reviewer_id'] ?? null;
             $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : true;
             $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : true;
 
@@ -151,9 +150,9 @@ class UserController
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :reviewer_id, :is_approved, :is_reviewed, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at
+                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, is_approved, is_reviewed, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_approved, :is_reviewed, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -162,7 +161,6 @@ class UserController
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, $affiliatorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-            $stmt->bindValue(':reviewer_id', $reviewerId, $reviewerId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
 
@@ -217,7 +215,6 @@ class UserController
             $passwordHash = !empty($password) ? password_hash($password, PASSWORD_BCRYPT) : $existingUser['password_hash'];
 
             $affiliatorId = $data['affiliator_id'] ?? null;
-            $reviewerId = $data['reviewer_id'] ?? null;
             $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : true;
             $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : true;
 
@@ -229,12 +226,11 @@ class UserController
                     email = :email,
                     password_hash = :password_hash,
                     affiliator_id = :affiliator_id,
-                    reviewer_id = :reviewer_id,
                     is_approved = :is_approved,
                     is_reviewed = :is_reviewed,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at
+                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -243,7 +239,6 @@ class UserController
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, $affiliatorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-            $stmt->bindValue(':reviewer_id', $reviewerId, $reviewerId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
             $stmt->bindValue(':id', $id, PDO::PARAM_INT);
@@ -301,7 +296,7 @@ class UserController
                     is_reviewed = :is_reviewed,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at
+                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);

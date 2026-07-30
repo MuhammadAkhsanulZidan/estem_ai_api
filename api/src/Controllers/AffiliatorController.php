@@ -5,6 +5,8 @@ namespace App\Controllers;
 use App\Config\Database;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+use App\Helpers\StatusHelper;
+use App\Middleware\AuthMiddleware;
 use PDO;
 
 class AffiliatorController
@@ -27,66 +29,69 @@ class AffiliatorController
 
                 if (!$affiliator) {
                     (new ApiResponse(false, 'Affiliator not found'))->send(404);
+                    return;
                 }
+
+                $affiliator['is_posted'] = true;
+                $affiliator['is_revised'] = false;
+                $affiliator['status_id'] = StatusHelper::resolveStatus($affiliator);
 
                 (new ApiResponse(true, 'Affiliator retrieved successfully', $affiliator))->send(200);
-            } else {
-                $filterField = $_GET['filter_field'] ?? "";
-                $filterValue = $_GET['filter_value'] ?? "";
-                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
-                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
-                $allowedFields = ['affiliator_name'];
-
-                $where = '';
-                $conditions = [];
-                $params = [];
-
-                if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
-                    $where = "WHERE {$filterField} ILIKE :val";
-                    $params['val'] = '%' . $filterValue . '%';
-                } else if($filterValue !== ""){
-                    $where = "WHERE affiliator_name ILIKE :val";
-                    $params['val'] = '%' . $filterValue . '%';
-                }
-
-                // 1. Get total items count
-                $countQuery = "SELECT COUNT(*) FROM affiliators $where";
-                $stmt = $pdo->prepare($countQuery);
-                foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-                }
-                $stmt->execute();
-                $totalItems = (int)$stmt->fetchColumn();
-
-                // 2. Get paginated results
-                $query = "SELECT * FROM affiliators $where ORDER BY id DESC";
-                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
-                if ($useLimit) {
-                    $offset = ($pageNo - 1) * $pageRow;
-                    $query .= " LIMIT :limit OFFSET :offset";
-                }
-
-                $stmt = $pdo->prepare($query);
-                foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-                }
-                if ($useLimit) {
-                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
-                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-                }
-
-                $stmt->execute();
-                $affiliators = $stmt->fetchAll();
-
-                $responseData = [
-                    'items' => $affiliators,
-                    'total_items' => $totalItems,
-                    'page_no' => $pageNo ?? 1,
-                    'page_row' => $pageRow ?? $totalItems
-                ];
-
-                (new ApiResponse(true, 'Affiliators retrieved successfully', $responseData))->send(200);
+                return;
             }
+
+            $params = [];
+            $statusConditions = [];
+
+            $isPosted   = $_GET['is_posted'] ?? "";
+            $isRevised  = $_GET['is_revised'] ?? "";
+            $isReviewed = $_GET['is_reviewed'] ?? "";
+            $isApproved = $_GET['is_approved'] ?? "";
+
+            // Status Filters
+            if ($isReviewed !== ""){
+                $statusConditions[] = "is_reviewed = :is_reviewed";
+                $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+            }
+            if ($isApproved !== ""){
+                $statusConditions[] = "is_approved = :is_approved";
+                $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+            }
+
+            $statusWhere = "";
+            if (!empty($statusConditions)) {
+                $statusWhere = "WHERE " . implode(" AND ", $statusConditions);
+            }
+
+            // Base query
+            $query = "
+                SELECT * FROM (
+                    SELECT *
+                    FROM affiliators
+                    {$statusWhere}
+                    ORDER BY id DESC
+                ) A
+            ";
+
+            $tableName = "(SELECT * FROM affiliators {$statusWhere}) A";
+
+            $responseData = RequestHelper::paginate(
+                pdo: $pdo,
+                query: $query,
+                tableName: $tableName,
+                params: $params,
+                filterFields: ['affiliator_name'],
+                mutateItems: function ($items) {
+                    foreach ($items as &$aff) {
+                        $aff['is_posted'] = true;
+                        $aff['is_revised'] = false;
+                        $aff['status_id'] = StatusHelper::resolveStatus($aff);
+                    }
+                    return $items;
+                }
+            );
+
+            (new ApiResponse(true, 'Affiliators retrieved successfully', $responseData))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -115,9 +120,29 @@ class AffiliatorController
             $operationalNumber = trim($data['operational_number'] ?? '');
             $bedNumber = isset($data['bed_number']) ? (int)$data['bed_number'] : null;
 
+            // Check if creator is admin to auto-approve
+            $isAdmin = false;
+            $headers = getallheaders();
+            $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+            if ($authHeader && preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+                try {
+                    $secret = $_ENV['JWT_SECRET'] ?? '';
+                    $decoded = \Firebase\JWT\JWT::decode($matches[1], new \Firebase\JWT\Key($secret, 'HS256'));
+                    $decodedArray = json_decode(json_encode($decoded), true);
+                    if (($decodedArray['data']['role_name'] ?? '') === 'admin') {
+                        $isAdmin = true;
+                    }
+                } catch (\Throwable $e) {
+                    // Ignore decoding error, keep isAdmin as false
+                }
+            }
+
+            $isApproved = $isAdmin;
+            $isReviewed = $isAdmin;
+
             $stmt = $pdo->prepare("
-                INSERT INTO affiliators (affiliator_name, affiliator_type, address, contact_phone, contact_email, director_name, operational_number, bed_number, created_at, updated_at)
-                VALUES (:name, :type, :address, :phone, :email, :director_name, :operational_number, :bed_number, NOW(), NOW())
+                INSERT INTO affiliators (affiliator_name, affiliator_type, address, contact_phone, contact_email, director_name, operational_number, bed_number, is_approved, is_reviewed, created_at, updated_at)
+                VALUES (:name, :type, :address, :phone, :email, :director_name, :operational_number, :bed_number, :is_approved, :is_reviewed, NOW(), NOW())
                 RETURNING *
             ");
 
@@ -129,6 +154,8 @@ class AffiliatorController
             $stmt->bindValue(':director_name', $directorName, PDO::PARAM_STR);
             $stmt->bindValue(':operational_number', $operationalNumber, PDO::PARAM_STR);
             $stmt->bindValue(':bed_number', $bedNumber, $bedNumber === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
 
             $stmt->execute();
             $newAffiliator = $stmt->fetch();
@@ -237,6 +264,71 @@ class AffiliatorController
             $stmt->execute(['id' => $id]);
 
             (new ApiResponse(true, 'Affiliator deleted successfully'))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Dedicated function for admin to approve or reject an affiliator.
+     */
+    public function review_affiliator(): void
+    {
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $_GET['id'] ?? $data['id'] ?? null;
+            $decision = $data['decision'] ?? null;
+
+            if ($id === null || $decision === null) {
+                (new ApiResponse(false, 'Affiliator ID and decision are required'))->send(400);
+                return;
+            }
+
+            // Check if exists
+            $stmt = $pdo->prepare("SELECT affiliator_name FROM affiliators WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            $existing = $stmt->fetch();
+            if (!$existing) {
+                (new ApiResponse(false, 'Affiliator not found'))->send(404);
+                return;
+            }
+
+            $isApproved = false;
+            $isReviewed = true;
+
+            if ($decision === 'approve') {
+                $isApproved = true;
+            } elseif ($decision === 'reject') {
+                $isApproved = false;
+            } else {
+                (new ApiResponse(false, 'Invalid decision'))->send(400);
+                return;
+            }
+
+            $stmt = $pdo->prepare("
+                UPDATE affiliators
+                SET is_approved = :is_approved,
+                    is_reviewed = :is_reviewed,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING *
+            ");
+
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+
+            $stmt->execute();
+            $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // Resolve friendly status for returning
+            $updated['is_posted'] = true;
+            $updated['is_revised'] = false;
+            $updated['status_id'] = StatusHelper::resolveStatus($updated);
+
+            (new ApiResponse(true, 'Affiliator decision saved successfully', $updated))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
