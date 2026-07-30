@@ -474,7 +474,7 @@ class AffiliatorProtocolController
     {
         AuthMiddleware::authorize(['reviewer', 'admin']);
         try {
-            $data = RequestHelper::getJsonBody();
+            $data = RequestHelper::getBody();
 
             if (empty($data['id']) || empty($data['decision'])) {
                 (new ApiResponse(false, 'Missing required fields: id, decision'))->send(400);
