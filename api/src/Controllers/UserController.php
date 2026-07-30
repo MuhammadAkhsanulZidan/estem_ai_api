@@ -394,32 +394,29 @@ class UserController
             $username = trim($data['username'] ?? '');
             $email = trim($data['email'] ?? '');
             $password = $data['password'] ?? '';
-            $affiliatorId = $data['affiliator_id'] ?? null;
 
-            if (empty($username) || empty($email) || empty($password) || $affiliatorId === null) {
-                (new ApiResponse(false, 'Username, email, password, and affiliator_id are required'))->send(400);
+            if (empty($username) || empty($email) || empty($password)) {
+                (new ApiResponse(false, 'Username, email, and password are required'))->send(400);
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
             $isActive = false; // Must be approved by admin
 
-            // Check if email already exists
-            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username AND affiliator_id = :affiliator_id");
+            // Check if username already exists globally
+            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username");
             $checkStmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $checkStmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
             $checkStmt->execute();
             if ($checkStmt->fetch()) {
                 (new ApiResponse(false, 'Username already exists'))->send(400);
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, affiliator_id, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
-                VALUES (:username, :affiliator_id, :role_id, :level_id, :email, :password_hash, :is_active, NOW(), NOW())
+                INSERT INTO users (username, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :is_active, NOW(), NOW())
                 RETURNING id, username, role_id, level_id, email, is_active, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_STR);
             $stmt->bindValue(':role_id', ROLE_ID::REVIEWER, PDO::PARAM_INT);
             $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT); // Level 1 for standard user
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);

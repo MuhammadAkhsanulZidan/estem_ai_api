@@ -6,6 +6,7 @@ use App\Config\Database;
 use App\Middleware\AuthMiddleware;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+use App\Helpers\StatusHelper;
 use PDO;
 
 class AffiliatorSupervisionController
@@ -139,23 +140,7 @@ class AffiliatorSupervisionController
                     // Decode JSON documents string returned by PostgreSQL
                     foreach ($supervisions as &$sup) {
                         $sup['documents'] = json_decode($sup['documents'] ?? '[]', true);
-
-                        $is_posted = $sup['is_posted'] ?? false;
-                        $is_reviewed = $sup['is_reviewed'] ?? false;
-                        $is_revised = $sup['is_revised'] ?? false;
-                        $is_approved = $sup['is_approved'] ?? false;
-
-                        if (!$is_posted) {
-                            $sup['status'] = 'draft';
-                        } else if ($is_reviewed && $is_approved) {
-                            $sup['status'] = 'approved';
-                        } else if ($is_reviewed && !$is_approved && $is_revised) {
-                            $sup['status'] = 'revision';
-                        } else if ($is_reviewed && !$is_approved && !$is_revised) {
-                            $sup['status'] = 'rejected';
-                        } else {
-                            $sup['status'] = 'submitted';
-                        }
+                        $sup['status'] = StatusHelper::resolveStatus($sup);
                     }
 
                     $responseData = [
@@ -201,23 +186,7 @@ class AffiliatorSupervisionController
             }
 
             $supervision['documents'] = json_decode($supervision['documents'] ?? '[]', true);
-
-            $is_posted = $supervision['is_posted'] ?? false;
-            $is_reviewed = $supervision['is_reviewed'] ?? false;
-            $is_revised = $supervision['is_revised'] ?? false;
-            $is_approved = $supervision['is_approved'] ?? false;
-
-            if (!$is_posted) {
-                $supervision['status'] = 'draft';
-            } else if ($is_reviewed && $is_approved) {
-                $supervision['status'] = 'approved';
-            } else if ($is_reviewed && !$is_approved && $is_revised) {
-                $supervision['status'] = 'revision';
-            } else if ($is_reviewed && !$is_approved && !$is_revised) {
-                $supervision['status'] = 'rejected';
-            } else {
-                $supervision['status'] = 'submitted';
-            }
+            $supervision['status'] = StatusHelper::resolveStatus($supervision);
 
             (new ApiResponse(true, 'Supervision details retrieved successfully', $supervision))->send(200);
         } catch (\Throwable $e) {
@@ -404,28 +373,33 @@ class AffiliatorSupervisionController
             }
 
             $userId = $user['data']['id'];
+            $flags = StatusHelper::mapStatusToFlags($status);
+
+            // Determine if approval fields should be updated
+            $isApprovedStatus = in_array($status, ['approved', 'active']);
 
             $stmt = $pdo->prepare("
                 UPDATE affiliator_supervisions
                 SET review_notes = :review_notes,
-                    is_approved = CASE WHEN :status_check1::varchar IN ('approved', 'active') THEN true ELSE false END,
-                    is_reviewed = true,
-                    is_revised = CASE WHEN :status_check2::varchar = 'revision' THEN true ELSE false END,
-                    is_posted = CASE WHEN :status_check3::varchar = 'draft' THEN false ELSE true END,
-                    approved_by = CASE WHEN :status_check4::varchar IN ('approved', 'active') THEN :approved_user_id::integer ELSE approved_by END,
-                    approved_at = CASE WHEN :status_check5::varchar IN ('approved', 'active') THEN NOW() ELSE approved_at END,
+                    is_posted = :is_posted,
+                    is_reviewed = :is_reviewed,
+                    is_revised = :is_revised,
+                    is_approved = :is_approved,
+                    approved_by = CASE WHEN :is_approved_status = true THEN :approved_user_id::integer ELSE approved_by END,
+                    approved_at = CASE WHEN :is_approved_status2 = true THEN NOW() ELSE approved_at END,
                     updated_by = :user_id::integer,
                     updated_at = NOW()
                 WHERE id = :id::integer
                 RETURNING *
             ");
 
-            $stmt->bindValue(':status_check1', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':status_check2', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':status_check3', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':status_check4', $status, PDO::PARAM_STR);
-            $stmt->bindValue(':status_check5', $status, PDO::PARAM_STR);
             $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $stmt->bindValue(':is_posted', $flags['is_posted'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $flags['is_reviewed'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_revised', $flags['is_revised'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $flags['is_approved'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved_status', $isApprovedStatus, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved_status2', $isApprovedStatus, PDO::PARAM_BOOL);
             $stmt->bindValue(':approved_user_id', $userId, PDO::PARAM_INT);
             $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
             $stmt->bindValue(':id', $id, PDO::PARAM_INT);

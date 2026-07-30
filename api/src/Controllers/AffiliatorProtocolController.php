@@ -6,11 +6,12 @@ use App\Config\Database;
 use App\Middleware\AuthMiddleware;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+use App\Helpers\StatusHelper;
 use PDO;
 
 class AffiliatorProtocolController
 {
-/**
+    /**
      * Retrieve affiliator protocols (all or single by ID).
      */
     public function get()
@@ -42,6 +43,7 @@ class AffiliatorProtocolController
                 }
 
                 $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
+                $protocol['status_id'] = StatusHelper::resolveStatus($protocol);
 
                 (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
             } else {
@@ -106,9 +108,10 @@ class AffiliatorProtocolController
                 $stmt->execute();
                 $protocols = $stmt->fetchAll();
 
-                // Decode JSON string returned by PostgreSQL for each row
+                // Decode JSON string and resolve status dynamically for each row
                 foreach ($protocols as &$p) {
                     $p['documents'] = json_decode($p['documents'] ?? '[]', true);
+                    $p['status_id'] = StatusHelper::resolveStatus($p);
                 }
 
                 $responseData = [
@@ -124,6 +127,7 @@ class AffiliatorProtocolController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
     /**
      * Create a new affiliator protocol.
      */
@@ -155,9 +159,11 @@ class AffiliatorProtocolController
             $reviewerNote = $data['reviewer_note'] ?? null;
             $createdBy = $user['data']['id'] ?? null;
 
+            $flags = StatusHelper::mapStatusToFlags($statusId);
+
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_protocols (affiliator_id, protocol_reference_id, protocol_name, indication, protocol_version, status_id, creator_note, reviewer_note, create_by, created_at, updated_at)
-                VALUES (:affiliator_id, :protocol_reference_id, :protocol_name, :indication, :protocol_version, :status_id, :creator_note, :reviewer_note, :create_by, NOW(), NOW())
+                INSERT INTO affiliator_protocols (affiliator_id, protocol_reference_id, protocol_name, indication, protocol_version, is_posted, is_reviewed, is_revised, is_approved, creator_note, reviewer_note, create_by, created_at, updated_at)
+                VALUES (:affiliator_id, :protocol_reference_id, :protocol_name, :indication, :protocol_version, :is_posted, :is_reviewed, :is_revised, :is_approved, :creator_note, :reviewer_note, :create_by, NOW(), NOW())
                 RETURNING *
             ");
 
@@ -166,7 +172,10 @@ class AffiliatorProtocolController
             $stmt->bindValue(':protocol_name', $protocolName, PDO::PARAM_STR);
             $stmt->bindValue(':indication', $indication, $indication === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':protocol_version', $protocolVersion, $protocolVersion === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
-            $stmt->bindValue(':status_id', $statusId, PDO::PARAM_STR);
+            $stmt->bindValue(':is_posted', $flags['is_posted'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $flags['is_reviewed'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_revised', $flags['is_revised'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $flags['is_approved'], PDO::PARAM_BOOL);
             $stmt->bindValue(':creator_note', $creatorNote, $creatorNote === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':reviewer_note', $reviewerNote, $reviewerNote === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':create_by', $createdBy, $createdBy === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
@@ -210,6 +219,7 @@ class AffiliatorProtocolController
             $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_protocol_documents WHERE protocol_id = :protocol_id");
             $docStmt->execute(['protocol_id' => $newProtocol['id']]);
             $newProtocol['documents'] = $docStmt->fetchAll() ?: [];
+            $newProtocol['status_id'] = StatusHelper::resolveStatus($newProtocol);
 
             (new ApiResponse(true, 'Protocol created successfully', $newProtocol))->send(201);
         } catch (\Throwable $e) {
@@ -243,7 +253,7 @@ class AffiliatorProtocolController
 
             $affiliatorId = $data['affiliator_id'] ?? $existing['affiliator_id'];
             $protocolName = isset($data['protocol_name']) ? trim($data['protocol_name']) : $existing['protocol_name'];
-            $statusId = isset($data['status_id']) ? trim($data['status_id']) : $existing['status_id'];
+            $statusId = isset($data['status_id']) ? trim($data['status_id']) : StatusHelper::resolveStatus($existing);
 
             if ($affiliatorId === null || empty($protocolName) || empty($statusId)) {
                 (new ApiResponse(false, 'affiliator_id, protocol_name, and status_id are required'))->send(400);
@@ -256,6 +266,8 @@ class AffiliatorProtocolController
             $reviewerNote = isset($data['reviewer_note']) ? $data['reviewer_note'] : $existing['reviewer_note'];
             $updatedBy = $user['data']['id'] ?? null;
 
+            $flags = StatusHelper::mapStatusToFlags($statusId);
+
             $stmt = $pdo->prepare("
                 UPDATE affiliator_protocols
                 SET affiliator_id = :affiliator_id,
@@ -263,7 +275,10 @@ class AffiliatorProtocolController
                     protocol_name = :protocol_name,
                     indication = :indication,
                     protocol_version = :protocol_version,
-                    status_id = :status_id,
+                    is_posted = :is_posted,
+                    is_reviewed = :is_reviewed,
+                    is_revised = :is_revised,
+                    is_approved = :is_approved,
                     creator_note = :creator_note,
                     reviewer_note = :reviewer_note,
                     updated_by = :updated_by,
@@ -277,7 +292,10 @@ class AffiliatorProtocolController
             $stmt->bindValue(':protocol_name', $protocolName, PDO::PARAM_STR);
             $stmt->bindValue(':indication', $indication, $indication === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':protocol_version', $protocolVersion, $protocolVersion === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
-            $stmt->bindValue(':status_id', $statusId, PDO::PARAM_STR);
+            $stmt->bindValue(':is_posted', $flags['is_posted'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $flags['is_reviewed'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_revised', $flags['is_revised'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $flags['is_approved'], PDO::PARAM_BOOL);
             $stmt->bindValue(':creator_note', $creatorNote, $creatorNote === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':reviewer_note', $reviewerNote, $reviewerNote === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':updated_by', $updatedBy, $updatedBy === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
@@ -285,6 +303,7 @@ class AffiliatorProtocolController
 
             $stmt->execute();
             $updatedProtocol = $stmt->fetch();
+            $updatedProtocol['status_id'] = StatusHelper::resolveStatus($updatedProtocol);
 
             (new ApiResponse(true, 'Protocol updated successfully', $updatedProtocol))->send(200);
         } catch (\Throwable $e) {
@@ -354,13 +373,13 @@ class AffiliatorProtocolController
 
             if (!empty($status)) {
                 if (in_array($status, ['submitted', 'review'])) {
-                    $whereParts[] = "ap.status_id IN ('submitted', 'review')";
+                    $whereParts[] = "(ap.is_posted = true AND ap.is_reviewed = false)";
                 } elseif ($status === 'revision') {
-                    $whereParts[] = "ap.status_id = 'revision'";
+                    $whereParts[] = "(ap.is_posted = true AND ap.is_reviewed = true AND ap.is_revised = true)";
                 } elseif ($status === 'approved') {
-                    $whereParts[] = "ap.status_id IN ('approved', 'active')";
+                    $whereParts[] = "(ap.is_posted = true AND ap.is_reviewed = true AND ap.is_approved = true)";
                 } elseif ($status === 'rejected') {
-                    $whereParts[] = "ap.status_id = 'rejected'";
+                    $whereParts[] = "(ap.is_posted = true AND ap.is_reviewed = true AND ap.is_approved = false AND ap.is_revised = false)";
                 }
             }
 
@@ -415,6 +434,7 @@ class AffiliatorProtocolController
 
                 foreach ($items as &$item) {
                     $item['documents'] = $docsByProtocol[$item['id']] ?? [];
+                    $item['status_id'] = StatusHelper::resolveStatus($item);
                 }
             }
 
@@ -457,6 +477,8 @@ class AffiliatorProtocolController
                 return;
             }
 
+            $flags = StatusHelper::mapStatusToFlags($statusId);
+
             $pdo = Database::getConnection();
 
             // Check if exists
@@ -470,18 +492,26 @@ class AffiliatorProtocolController
             // Update
             $updateSql = "
                 UPDATE affiliator_protocols
-                SET status_id = :status_id, reviewer_note = :reviewer_note
+                SET is_posted = :is_posted,
+                    is_reviewed = :is_reviewed,
+                    is_revised = :is_revised,
+                    is_approved = :is_approved,
+                    reviewer_note = :reviewer_note
                 WHERE id = :id
                 RETURNING *
             ";
             $updateStmt = $pdo->prepare($updateSql);
             $updateStmt->execute([
-                'status_id' => $statusId,
+                'is_posted' => $flags['is_posted'] ? 1 : 0,
+                'is_reviewed' => $flags['is_reviewed'] ? 1 : 0,
+                'is_revised' => $flags['is_revised'] ? 1 : 0,
+                'is_approved' => $flags['is_approved'] ? 1 : 0,
                 'reviewer_note' => $reviewerNote,
                 'id' => $id
             ]);
 
             $updatedRow = $updateStmt->fetch(PDO::FETCH_ASSOC);
+            $updatedRow['status_id'] = StatusHelper::resolveStatus($updatedRow);
 
             (new ApiResponse(true, 'Review decision saved', $updatedRow))->send(200);
 
