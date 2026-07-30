@@ -363,11 +363,11 @@ class AffiliatorProtocolController
             $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 8;
             $offset = ($pageNo - 1) * $pageRow;
 
-            $whereParts = ["1=1"];
+            $whereParts = ["ap.is_posted = true"];
             $params = [];
 
             if (!empty($filterValue)) {
-                $whereParts[] = "(ap.protocol_name ILIKE :filter OR ap.indication ILIKE :filter OR a.name ILIKE :filter)";
+                $whereParts[] = "(ap.protocol_name ILIKE :filter OR ap.indication ILIKE :filter OR a.affiliator_name ILIKE :filter)";
                 $params['filter'] = "%{$filterValue}%";
             }
 
@@ -398,7 +398,7 @@ class AffiliatorProtocolController
             $sql = "
                 SELECT
                     ap.*,
-                    a.name as hospital_name
+                    a.affiliator_name as hospital_name
                 FROM affiliator_protocols ap
                 JOIN affiliators a ON ap.affiliator_id = a.id
                 WHERE $whereSql
