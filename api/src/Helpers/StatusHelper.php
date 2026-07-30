@@ -16,7 +16,7 @@ class StatusHelper
         if (!$isPosted) {
             return 'draft';
         }
-        
+
         if ($isReviewed) {
             if ($isApproved) {
                 return 'approved';

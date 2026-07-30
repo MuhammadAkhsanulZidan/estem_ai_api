@@ -76,29 +76,40 @@ class RequestHelper {
     */
     public static function paginate(
         PDO $pdo,
-        string $baseQuery,
-        string $whereClause = 'WHERE 1=1',
+        string $query,
+        string $tableName,
+        string $where = '',
         array $params = [],
-        string $orderBy = '',
-        int $pageNo = 1,
-        int $pageRow = 10
+        ?callable $mutateItems = null
     ): array {
-        $useLimit = $pageNo > 0 && $pageRow > 0;
+        $allowedFields = ['protocol_name'];
+        $filterField = $_GET['filter_field'] ?? "";
+        $filterValue = $_GET['filter_value'] ?? "";
 
-        // 1. Calculate Total Matching Count
-        $countQuery = "SELECT COUNT(*) FROM ({$baseQuery} {$whereClause}) AS count_subquery";
-        $countStmt = $pdo->prepare($countQuery);
+        $where = 'WHERE 1=1';
+        $params = [];
+
+        if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
+            $where = "WHERE ap.{$filterField} ILIKE :val";
+            $params['val'] = '%' . $filterValue . '%';
+        } else if ($filterValue !== "") {
+            $where = "WHERE ap.protocol_name ILIKE :val";
+            $params['val'] = '%' . $filterValue . '%';
+        }
+
+        $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+        $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+
+        // 1. Get total items count
+        $countQuery = "SELECT COUNT(*) FROM $tableName $where";
+        $stmt = $pdo->prepare($countQuery);
         foreach ($params as $key => $val) {
-            $countStmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
         }
-        $countStmt->execute();
-        $totalItems = (int) $countStmt->fetchColumn();
+        $stmt->execute();
 
-        // 2. Fetch Paginated Records
-        $query = "{$baseQuery} {$whereClause}";
-        if ($orderBy !== '') {
-            $query .= " {$orderBy}";
-        }
+        $totalItems = (int)$stmt->fetchColumn();
+        $useLimit = $pageNo > 0 && $pageRow > 0;
 
         if ($useLimit) {
             $offset = ($pageNo - 1) * $pageRow;
@@ -109,7 +120,6 @@ class RequestHelper {
         foreach ($params as $key => $val) {
             $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
         }
-
         if ($useLimit) {
             $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
             $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -117,6 +127,11 @@ class RequestHelper {
 
         $stmt->execute();
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 2. Apply mutation if provided
+        if ($mutateItems !== null) {
+            $items = $mutateItems($items);
+        }
 
         // 3. Return Clean Pagination Payload
         return [

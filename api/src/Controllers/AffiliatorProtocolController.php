@@ -12,8 +12,8 @@ use PDO;
 class AffiliatorProtocolController
 {
     /**
-     * Retrieve affiliator protocols (all or single by ID).
-     */
+    * Retrieve affiliator protocols (all or single by ID).
+    */
     public function get()
     {
         try {
@@ -22,7 +22,7 @@ class AffiliatorProtocolController
 
             if ($id !== null) {
                 // Single Protocol with aggregated documents
-                $stmt = $pdo->prepare("
+                $protocol = Database::fetch("
                     SELECT
                         ap.*,
                         COALESCE(
@@ -34,12 +34,11 @@ class AffiliatorProtocolController
                         ) AS documents
                     FROM affiliator_protocols ap
                     WHERE ap.id = :id
-                ");
-                $stmt->execute(['id' => $id]);
-                $protocol = $stmt->fetch();
+                ", ['id' => $id]);
 
                 if (!$protocol) {
                     (new ApiResponse(false, 'Protocol not found'))->send(404);
+                    return; // Prevent execution from continuing
                 }
 
                 $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
@@ -47,33 +46,31 @@ class AffiliatorProtocolController
 
                 (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
             } else {
-                $filterField = $_GET['filter_field'] ?? "";
-                $filterValue = $_GET['filter_value'] ?? "";
-                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
-                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
-                $allowedFields = ['protocol_name'];
-
                 $where = '';
                 $params = [];
+                $isPosted   = $_GET['is_posted'] ?? "";
+                $isRevised  = $_GET['is_revised'] ?? "";
+                $isReviewed = $_GET['is_reviewed'] ?? "";
+                $isApproved = $_GET['is_approved'] ?? "";
 
-                if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
-                    $where = "WHERE ap.{$filterField} ILIKE :val";
-                    $params['val'] = '%' . $filterValue . '%';
-                } else if ($filterValue !== "") {
-                    $where = "WHERE ap.protocol_name ILIKE :val";
-                    $params['val'] = '%' . $filterValue . '%';
+                // Status Filters
+                if ($isPosted !== ""){
+                    $where .= " AND is_posted = :is_posted";
+                    $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
+                }
+                if ($isReviewed !== ""){
+                    $where .= " AND is_reviewed = :is_reviewed";
+                    $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+                }
+                if ($isRevised !== ""){
+                    $where .= " AND is_revised = :is_revised";
+                    $params['is_revised'] = ($isRevised === "1" || $isRevised === "true") ? 'true' : 'false';
+                }
+                if ($isApproved !== ""){
+                    $where .= " AND is_approved = :is_approved"; // Fixed table alias to ap
+                    $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
                 }
 
-                // 1. Get total items count
-                $countQuery = "SELECT COUNT(*) FROM affiliator_protocols ap $where";
-                $stmt = $pdo->prepare($countQuery);
-                foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-                }
-                $stmt->execute();
-                $totalItems = (int)$stmt->fetchColumn();
-
-                // 2. Get paginated results with aggregated documents
                 $query = "
                     SELECT
                         ap.*, aff.affiliator_name,
@@ -86,40 +83,24 @@ class AffiliatorProtocolController
                         ) AS documents
                     FROM affiliator_protocols ap
                     LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
-                    $where
                     ORDER BY ap.id DESC
                 ";
 
-                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
-                if ($useLimit) {
-                    $offset = ($pageNo - 1) * $pageRow;
-                    $query .= " LIMIT :limit OFFSET :offset";
-                }
-
-                $stmt = $pdo->prepare($query);
-                foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-                }
-                if ($useLimit) {
-                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
-                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-                }
-
-                $stmt->execute();
-                $protocols = $stmt->fetchAll();
-
-                // Decode JSON string and resolve status dynamically for each row
-                foreach ($protocols as &$p) {
-                    $p['documents'] = json_decode($p['documents'] ?? '[]', true);
-                    $p['status_id'] = StatusHelper::resolveStatus($p);
-                }
-
-                $responseData = [
-                    'items'       => $protocols,
-                    'total_items' => $totalItems,
-                    'page_no'     => $pageNo ?? 1,
-                    'page_row'    => $pageRow ?? $totalItems
-                ];
+                $responseData = RequestHelper::paginate(
+                    pdo: $pdo,
+                    query: $query,
+                    tableName: 'affiliator_protocols ap',
+                    queryWhere: $where,
+                    params: $params,
+                    filterFields: ['protocol_name'],
+                    mutateItems: function ($items) {
+                        foreach ($items as &$p) {
+                            $p['documents'] = json_decode($p['documents'] ?? '[]', true);
+                            $p['status_id'] = StatusHelper::resolveStatus($p);
+                        }
+                        return $items;
+                    }
+                );
 
                 (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
             }
