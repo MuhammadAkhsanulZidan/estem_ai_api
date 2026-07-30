@@ -121,8 +121,17 @@ class RequestHelper {
         $totalItems = (int)$stmt->fetchColumn();
         $useLimit = $pageNo > 0 && $pageRow > 0;
 
-        // Apply filtering clause to main query
-        if (stripos($query, 'WHERE') !== false) {
+        // Apply filtering clause to main query (detecting if the outer query has a WHERE clause)
+        $lastParenthesis = strrpos($query, ')');
+        $hasOuterWhere = false;
+        if ($lastParenthesis !== false) {
+            $outerPart = substr($query, $lastParenthesis);
+            $hasOuterWhere = stripos($outerPart, 'WHERE') !== false;
+        } else {
+            $hasOuterWhere = stripos($query, 'WHERE') !== false;
+        }
+
+        if ($hasOuterWhere) {
             $query .= " {$whereClause}";
         } else {
             $query .= " WHERE 1=1 {$whereClause}";
