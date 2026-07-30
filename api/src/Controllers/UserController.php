@@ -7,6 +7,7 @@ use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
 use App\Constants\Role_Id;
 use App\Constants\Level_Id;
+use App\Helpers\StatusHelper;
 
 use PDO;
 
@@ -23,7 +24,7 @@ class UserController
 
             if ($id !== null) {
                 $stmt = $pdo->prepare("
-                    SELECT u.id, u.username, u.role_id, u.level_id, u.email, u.affiliator_id, u.is_active, u.created_at, u.updated_at, a.affiliator_name
+                    SELECT u.id, u.username, u.role_id, u.level_id, u.email, u.affiliator_id, u.is_approved, u.is_reviewed, u.created_at, u.updated_at, a.affiliator_name
                     FROM users u
                     LEFT JOIN affiliators a ON u.affiliator_id = a.id
                     WHERE u.id = :id
@@ -33,86 +34,85 @@ class UserController
 
                 if (!$user) {
                     (new ApiResponse(false, 'User not found'))->send(404);
+                    return;
                 }
+
+                $user['is_posted'] = true;
+                $user['is_revised'] = false;
+                $user['status_id'] = StatusHelper::resolveStatus($user);
 
                 (new ApiResponse(true, 'User retrieved successfully', $user))->send(200);
-            } else {
-                $filterField = $_GET['filter_field'] ?? "";
-                $filterValue = $_GET['filter_value'] ?? "";
-                $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
-                $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
-                $isAffiliator = isset($_GET['is_affiliator']) ? (int)$_GET['is_affiliator'] : 0;
-                $isReviewer = isset($_GET['is_reviewer']) ? (int)$_GET['is_reviewer'] : 0;
+                return;
+            }
 
-                $allowedFields = ['username'];
+            $params = [];
+            $statusConditions = [];
 
-                $where = 'WHERE 1=1';
-                $conditions = [];
-                $params = [];
+            $isPosted   = $_GET['is_posted'] ?? "";
+            $isRevised  = $_GET['is_revised'] ?? "";
+            $isReviewed = $_GET['is_reviewed'] ?? "";
+            $isApproved = $_GET['is_approved'] ?? "";
 
-                if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
-                    $where = "{$where} AND {$filterField} ILIKE :val";
-                    $params['val'] = '%' . $filterValue . '%';
-                } else if($filterValue !== ""){
-                    $where = "{$where} AND username ILIKE :val";
-                    $params['val'] = '%' . $filterValue . '%';
-                }
+            // Status Filters
+            if ($isReviewed !== ""){
+                $statusConditions[] = "u.is_reviewed = :is_reviewed";
+                $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+            }
+            if ($isApproved !== ""){
+                $statusConditions[] = "u.is_approved = :is_approved";
+                $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+            }
 
-                if ($isAffiliator == 1) {
-                    $where .= " AND affiliator_id IS NOT NULL AND role_id = " . ROLE_ID::AFFILIATOR;
-                }
+            $isAffiliator = isset($_GET['is_affiliator']) ? (int)$_GET['is_affiliator'] : 0;
+            $isReviewer = isset($_GET['is_reviewer']) ? (int)$_GET['is_reviewer'] : 0;
 
-                if($isReviewer == 1){
-                    $where .= " AND role_id = ". ROLE_ID::REVIEWER;
-                }
+            if ($isAffiliator == 1) {
+                $statusConditions[] = "u.affiliator_id IS NOT NULL AND u.role_id = " . ROLE_ID::AFFILIATOR;
+            }
+            if ($isReviewer == 1){
+                $statusConditions[] = "u.role_id = " . ROLE_ID::REVIEWER;
+            }
 
-                // 1. Get total items count
-                $countQuery = "SELECT COUNT(*) FROM users {$where}";
-                $stmt = $pdo->prepare($countQuery);
-                foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-                }
-                $stmt->execute();
-                $totalItems = (int)$stmt->fetchColumn();
+            $statusWhere = "";
+            if (!empty($statusConditions)) {
+                $statusWhere = "WHERE " . implode(" AND ", $statusConditions);
+            }
 
-                // 2. Get paginated results
-                $query = "
-                    SELECT u.id, u.username, u.email, u.is_active,
-                    u.role_id, u.level_id,
-                    u.affiliator_id, a.affiliator_name,
-                    u.created_at
+            // Base query with status filtering inside the inner query
+            $query = "
+                SELECT * FROM (
+                    SELECT
+                        u.id, u.username, u.email, u.is_approved, u.is_reviewed,
+                        u.role_id, u.level_id,
+                        u.affiliator_id, a.affiliator_name,
+                        u.created_at
                     FROM users u
                     LEFT JOIN affiliators a ON u.affiliator_id = a.id
-                    $where ORDER BY id DESC
-                ";
+                    {$statusWhere}
+                    ORDER BY u.id DESC
+                ) A
+            ";
 
-                $useLimit = $pageNo !== null && $pageRow !== null && $pageNo > 0 && $pageRow > 0;
-                if ($useLimit) {
-                    $offset = ($pageNo - 1) * $pageRow;
-                    $query .= " LIMIT :limit OFFSET :offset";
+            // Dynamic table expression for pagination counting
+            $tableName = "(SELECT u.id, u.username, u.email, u.is_approved, u.is_reviewed, u.role_id, u.level_id, u.affiliator_id, u.created_at FROM users u {$statusWhere}) A";
+
+            $responseData = RequestHelper::paginate(
+                pdo: $pdo,
+                query: $query,
+                tableName: $tableName,
+                params: $params,
+                filterFields: ['username', 'email'],
+                mutateItems: function ($items) {
+                    foreach ($items as &$u) {
+                        $u['is_posted'] = true;
+                        $u['is_revised'] = false;
+                        $u['status_id'] = StatusHelper::resolveStatus($u);
+                    }
+                    return $items;
                 }
+            );
 
-                $stmt = $pdo->prepare($query);
-                foreach ($params as $key => $val) {
-                    $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-                }
-                if ($useLimit) {
-                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
-                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-                }
-
-                $stmt->execute();
-                $users = $stmt->fetchAll();
-
-                $responseData = [
-                    'items' => $users,
-                    'total_items' => $totalItems,
-                    'page_no' => $pageNo ?? 1,
-                    'page_row' => $pageRow ?? $totalItems
-                ];
-
-                (new ApiResponse(true, 'Users retrieved successfully', $responseData))->send(200);
-            }
+            (new ApiResponse(true, 'Users retrieved successfully', $responseData))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -140,7 +140,8 @@ class UserController
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
             $affiliatorId = $data['affiliator_id'] ?? null;
             $reviewerId = $data['reviewer_id'] ?? null;
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
+            $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : true;
+            $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : true;
 
             // Check if email already exists
             $checkStmt = $pdo->prepare("SELECT id FROM users WHERE email = :email");
@@ -150,9 +151,9 @@ class UserController
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id,  is_active, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, : :is_active, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, affiliator_id,  is_active, created_at, updated_at
+                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :reviewer_id, :is_approved, :is_reviewed, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -162,7 +163,8 @@ class UserController
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, $affiliatorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':reviewer_id', $reviewerId, $reviewerId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
 
             $stmt->execute();
             $newUser = $stmt->fetch();
@@ -216,7 +218,8 @@ class UserController
 
             $affiliatorId = $data['affiliator_id'] ?? null;
             $reviewerId = $data['reviewer_id'] ?? null;
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
+            $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : true;
+            $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : true;
 
             $stmt = $pdo->prepare("
                 UPDATE users
@@ -226,11 +229,12 @@ class UserController
                     email = :email,
                     password_hash = :password_hash,
                     affiliator_id = :affiliator_id,
-                    reviewer_id = :
-                    is_active = :is_active,
+                    reviewer_id = :reviewer_id,
+                    is_approved = :is_approved,
+                    is_reviewed = :is_reviewed,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id,  is_active, created_at, updated_at
+                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -240,7 +244,8 @@ class UserController
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, $affiliatorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':reviewer_id', $reviewerId, $reviewerId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
             $stmt->bindValue(':id', $id, PDO::PARAM_INT);
 
             $stmt->execute();
@@ -251,20 +256,22 @@ class UserController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
     /**
-     * Update an existing user.
+     * Dedicated function for admin to approve or reject a user.
      */
-    public function approve_user()
+    public function review_user(): void
     {
         try {
             $pdo = Database::getConnection();
             $data = RequestHelper::getBody();
 
             $id = $_GET['id'] ?? $data['id'] ?? null;
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : false;
+            $decision = $data['decision'] ?? null;
 
-            if ($id === null) {
-                (new ApiResponse(false, 'User ID is required'))->send(400);
+            if ($id === null || $decision === null) {
+                (new ApiResponse(false, 'User ID and decision are required'))->send(400);
+                return;
             }
 
             // Check if user exists
@@ -273,23 +280,43 @@ class UserController
             $existingUser = $stmt->fetch();
             if (!$existingUser) {
                 (new ApiResponse(false, 'User not found'))->send(404);
+                return;
             }
-            $isActive = isset($data['is_active']) ? (bool)$data['is_active'] : true;
+
+            $isApproved = false;
+            $isReviewed = true;
+
+            if ($decision === 'approve') {
+                $isApproved = true;
+            } elseif ($decision === 'reject') {
+                $isApproved = false;
+            } else {
+                (new ApiResponse(false, 'Invalid decision'))->send(400);
+                return;
+            }
+
             $stmt = $pdo->prepare("
                 UPDATE users
-                SET is_active = :is_active,
+                SET is_approved = :is_approved,
+                    is_reviewed = :is_reviewed,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id,  is_active, created_at, updated_at
+                RETURNING id, username, role_id, level_id, email, affiliator_id, reviewer_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
-            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
             $stmt->bindValue(':id', $id, PDO::PARAM_INT);
 
             $stmt->execute();
-            $updatedUser = $stmt->fetch();
+            $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            (new ApiResponse(true, 'User updated successfully', $updatedUser))->send(200);
+            // Resolve friendly status for returning
+            $updatedUser['is_posted'] = true;
+            $updatedUser['is_revised'] = false;
+            $updatedUser['status_id'] = StatusHelper::resolveStatus($updatedUser);
+
+            (new ApiResponse(true, 'User decision saved successfully', $updatedUser))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -330,7 +357,7 @@ class UserController
     }
 
     /**
-     * Register a new user under an affiliator (defaults to is_active = false).
+     * Register a new user under an affiliator (defaults to is_approved = false, is_reviewed = false).
      */
     public function register_affiliator()
     {
@@ -348,7 +375,8 @@ class UserController
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
-            $isActive = false; // Must be approved by admin
+            $isApproved = false; // Must be approved by admin
+            $isReviewed = false;
 
             // Check if email already exists
             $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username AND affiliator_id = :affiliator_id");
@@ -360,9 +388,9 @@ class UserController
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, is_active, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_active, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, affiliator_id, is_active, created_at, updated_at
+                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, is_approved, is_reviewed, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_approved, :is_reviewed, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -371,7 +399,8 @@ class UserController
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
-            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
 
             $stmt->execute();
             $newUser = $stmt->fetch();
@@ -383,7 +412,7 @@ class UserController
     }
 
     /**
-     * Register a new user as reviewer (defaults to is_active = false).
+     * Register a new user as reviewer (defaults to is_approved = false, is_reviewed = false).
      */
     public function register_reviewer()
     {
@@ -400,7 +429,8 @@ class UserController
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
-            $isActive = false; // Must be approved by admin
+            $isApproved = false; // Must be approved by admin
+            $isReviewed = false;
 
             // Check if username already exists globally
             $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username");
@@ -411,9 +441,9 @@ class UserController
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, is_active, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :is_active, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, is_active, created_at, updated_at
+                INSERT INTO users (username, role_id, level_id, email, password_hash, is_approved, is_reviewed, created_at, updated_at)
+                VALUES (:username, :role_id, :level_id, :email, :password_hash, :is_approved, :is_reviewed, NOW(), NOW())
+                RETURNING id, username, role_id, level_id, email, is_approved, is_reviewed, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
@@ -421,7 +451,8 @@ class UserController
             $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT); // Level 1 for standard user
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
-            $stmt->bindValue(':is_active', $isActive, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
 
             $stmt->execute();
             $newUser = $stmt->fetch();

@@ -71,7 +71,7 @@ try {
     $router->get('/v1/users', [UserController::class, 'get']);
     $router->post('/v1/users', [UserController::class, 'post']);
     $router->put('/v1/users', [UserController::class, 'put']);
-    $router->put('/v1/users/approve', [UserController::class, 'approve_user']);
+    $router->post('/v1/users/review', [UserController::class, 'review_user']);
     $router->delete('/v1/users', [UserController::class, 'delete']);
 
     $router->get('/v1/affiliators', [AffiliatorController::class, 'get']);
