@@ -20,6 +20,21 @@ class AffiliatorProtocolController
             $pdo = Database::getConnection();
             $id = $_GET['id'] ?? null;
 
+            $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
+            $roleName = $user['data']['role_name'] ?? '';
+            $userId = $user['data']['id'] ?? null;
+
+            $affiliatorId = null;
+            if ($roleName === 'affiliator') {
+                $stmtUser = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+                $stmtUser->execute(['id' => $userId]);
+                $affiliatorId = $stmtUser->fetchColumn();
+                if (!$affiliatorId) {
+                    (new ApiResponse(false, 'User has no associated affiliator'))->send(403);
+                    return;
+                }
+            }
+
             if ($id !== null) {
                 $protocol = Database::fetch("
                     SELECT
@@ -40,6 +55,11 @@ class AffiliatorProtocolController
                     return;
                 }
 
+                if ($affiliatorId !== null && (int)$protocol['affiliator_id'] !== (int)$affiliatorId) {
+                    (new ApiResponse(false, 'Forbidden: You do not own this protocol'))->send(403);
+                    return;
+                }
+
                 $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
                 $protocol['status_id'] = StatusHelper::resolveStatus($protocol);
 
@@ -50,10 +70,16 @@ class AffiliatorProtocolController
             $params = [];
             $statusConditions = [];
 
+            if ($affiliatorId !== null) {
+                $statusConditions[] = "ap.affiliator_id = :affiliator_id";
+                $params['affiliator_id'] = $affiliatorId;
+            }
+
             $isPosted   = $_GET['is_posted'] ?? "";
             $isRevised  = $_GET['is_revised'] ?? "";
             $isReviewed = $_GET['is_reviewed'] ?? "";
             $isApproved = $_GET['is_approved'] ?? "";
+
 
             // Status Filters
             if ($isPosted !== ""){
