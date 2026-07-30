@@ -21,7 +21,6 @@ class AffiliatorProtocolController
             $id = $_GET['id'] ?? null;
 
             if ($id !== null) {
-                // Single Protocol with aggregated documents
                 $protocol = Database::fetch("
                     SELECT
                         ap.*,
@@ -48,8 +47,9 @@ class AffiliatorProtocolController
                 return;
             }
 
-            $where = '';
             $params = [];
+            $statusConditions = [];
+
             $isPosted   = $_GET['is_posted'] ?? "";
             $isRevised  = $_GET['is_revised'] ?? "";
             $isReviewed = $_GET['is_reviewed'] ?? "";
@@ -57,23 +57,28 @@ class AffiliatorProtocolController
 
             // Status Filters
             if ($isPosted !== ""){
-                $where .= " AND is_posted = :is_posted";
+                $statusConditions[] = "ap.is_posted = :is_posted";
                 $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
             }
             if ($isReviewed !== ""){
-                $where .= " AND is_reviewed = :is_reviewed";
+                $statusConditions[] = "ap.is_reviewed = :is_reviewed";
                 $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
             }
             if ($isRevised !== ""){
-                $where .= " AND is_revised = :is_revised";
+                $statusConditions[] = "ap.is_revised = :is_revised";
                 $params['is_revised'] = ($isRevised === "1" || $isRevised === "true") ? 'true' : 'false';
             }
             if ($isApproved !== ""){
-                $where .= " AND is_approved = :is_approved";
+                $statusConditions[] = "ap.is_approved = :is_approved";
                 $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
             }
 
-            // Base subquery wrapped to make 'affiliator_name' directly filterable by pagination helper
+            $statusWhere = "";
+            if (!empty($statusConditions)) {
+                $statusWhere = "WHERE " . implode(" AND ", $statusConditions);
+            }
+
+            // Base query with status filtering inside the inner query
             $query = "
                 SELECT * FROM (
                     SELECT
@@ -87,20 +92,20 @@ class AffiliatorProtocolController
                         ) AS documents
                     FROM affiliator_protocols ap
                     LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
+                    {$statusWhere}
                     ORDER BY ap.id DESC
                 ) A
             ";
 
-            // Pass subquery as target table so count query also sees 'affiliator_name'
-            $subqueryTable = "(SELECT ap.*, aff.affiliator_name FROM affiliator_protocols ap LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id) A";
+            // Dynamic table expression for pagination counting
+            $tableName = "(SELECT ap.*, aff.affiliator_name FROM affiliator_protocols ap LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id {$statusWhere}) A";
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,
                 query: $query,
-                tableName: $subqueryTable,
-                queryWhere: $where,
+                tableName: $tableName,
                 params: $params,
-                filterFields: ['protocol_name', 'affiliator_name'], // Fixed: array of separate strings
+                filterFields: ['protocol_name', 'affiliator_name'],
                 mutateItems: function ($items) {
                     foreach ($items as &$p) {
                         $p['documents'] = json_decode($p['documents'] ?? '[]', true);

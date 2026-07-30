@@ -1,6 +1,8 @@
 <?php
 namespace App\Helpers;
 
+use PDO;
+
 use App\Models\ApiResponse;
 
 class RequestHelper {
@@ -65,7 +67,6 @@ class RequestHelper {
     /**
     * Executes a paginated SQL query along with total count calculation.
     *
-    * @param PDO $pdo
     * @param string $baseQuery SQL query without WHERE or ORDER BY clauses.
     * @param string $whereClause Standard filter conditions (e.g., "WHERE 1=1 AND status = 'active'").
     * @param array $params Prepared statement bound values.
@@ -78,30 +79,39 @@ class RequestHelper {
         PDO $pdo,
         string $query,
         string $tableName,
-        string $where = '',
+        string $queryWhere = '',
+        array $filterFields = [],
         array $params = [],
         ?callable $mutateItems = null
     ): array {
-        $allowedFields = ['protocol_name'];
         $filterField = $_GET['filter_field'] ?? "";
-        $filterValue = $_GET['filter_value'] ?? "";
+        $filterValue = trim($_GET['filter_value'] ?? "");
 
-        $where = 'WHERE 1=1';
-        $params = [];
+        // Build dynamic filtering clause
+        $filterConditions = [];
 
-        if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $allowedFields)) {
-            $where = "WHERE ap.{$filterField} ILIKE :val";
-            $params['val'] = '%' . $filterValue . '%';
-        } else if ($filterValue !== "") {
-            $where = "WHERE ap.protocol_name ILIKE :val";
-            $params['val'] = '%' . $filterValue . '%';
+        if ($filterField !== "" && $filterValue !== "" && in_array($filterField, $filterFields, true)) {
+            $filterConditions[] = "{$filterField} ILIKE :filter_val";
+            $params['filter_val'] = '%' . $filterValue . '%';
+        } elseif ($filterValue !== "" && !empty($filterFields)) {
+            $orConditions = [];
+            foreach ($filterFields as $f) {
+                $orConditions[] = "{$f} ILIKE :filter_val";
+            }
+            $filterConditions[] = "(" . implode(" OR ", $orConditions) . ")";
+            $params['filter_val'] = '%' . $filterValue . '%';
+        }
+
+        $whereClause = "";
+        if (!empty($filterConditions)) {
+            $whereClause = " AND " . implode(" AND ", $filterConditions);
         }
 
         $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
         $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
 
         // 1. Get total items count
-        $countQuery = "SELECT COUNT(*) FROM $tableName $where";
+        $countQuery = "SELECT COUNT(*) FROM {$tableName} WHERE 1=1 {$whereClause} {$queryWhere}";
         $stmt = $pdo->prepare($countQuery);
         foreach ($params as $key => $val) {
             $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
@@ -110,6 +120,13 @@ class RequestHelper {
 
         $totalItems = (int)$stmt->fetchColumn();
         $useLimit = $pageNo > 0 && $pageRow > 0;
+
+        // Apply filtering clause to main query
+        if (stripos($query, 'WHERE') !== false) {
+            $query .= " {$whereClause}";
+        } else {
+            $query .= " WHERE 1=1 {$whereClause}";
+        }
 
         if ($useLimit) {
             $offset = ($pageNo - 1) * $pageRow;

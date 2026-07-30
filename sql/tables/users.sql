@@ -9,7 +9,8 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,
     affiliator_id BIGINT,
     reviewer_id BIGINT,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_approved BOOLEAN NOT NULL DEFAULT FALSE,
+    is_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
