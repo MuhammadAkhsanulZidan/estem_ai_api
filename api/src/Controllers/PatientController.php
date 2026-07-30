@@ -167,6 +167,8 @@ class PatientController
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
+    }
+
     /**
      * Update an existing patient record.
      */
