@@ -21,7 +21,12 @@ CREATE TABLE affiliators (
     other_labor_number  INT,
     research_head   VARCHAR(100),
     reasearch_head_contact  VARCHAR(100),
+<<<<<<< HEAD
     affiliator_code VARCHAR(50) UNIQUE,
+=======
+    is_approved BOOLEAN NOT NULL DEFAULT FALSE,
+    is_reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+>>>>>>> 38f81c7b19fcada7573dc91ac39b307e15d4995a
     created_at TIMESTAMP DEFAULT NOW(),
     create_by  BIGINT,
     updated_at TIMESTAMP DEFAULT NOW(),
