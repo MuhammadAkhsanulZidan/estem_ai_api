@@ -88,6 +88,7 @@ try {
 
     $router->get('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'get']);
     $router->post('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'post']);
+    $router->post('/v1/affiliator-protocols/update', [AffiliatorProtocolController::class, 'put']);
     $router->put('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'put']);
     $router->delete('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'delete']);
     $router->get('/v1/reviewer/affiliator-protocols', [AffiliatorProtocolController::class, 'getReviewList']);

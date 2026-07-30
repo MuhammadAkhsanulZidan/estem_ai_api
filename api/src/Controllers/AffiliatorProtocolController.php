@@ -323,6 +323,84 @@ class AffiliatorProtocolController
 
             $stmt->execute();
             $updatedProtocol = $stmt->fetch();
+
+            // Delete removed documents
+            $keepIds = isset($data['keep_document_ids']) ? json_decode($data['keep_document_ids'], true) : null;
+            if (is_array($keepIds)) {
+                $docStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_protocol_documents WHERE protocol_id = :id");
+                $docStmt->execute(['id' => $id]);
+                $existingDocs = $docStmt->fetchAll();
+
+                $publicDir = __DIR__ . '/../../public/';
+                foreach ($existingDocs as $doc) {
+                    if (!in_array($doc['id'], $keepIds)) {
+                        // Delete physical file
+                        $absPath = realpath($publicDir . $doc['document_path']);
+                        if ($absPath && file_exists($absPath) && is_file($absPath)) {
+                            unlink($absPath);
+                        }
+                        // Delete DB record
+                        $delStmt = $pdo->prepare("DELETE FROM affiliator_protocol_documents WHERE id = :id");
+                        $delStmt->execute(['id' => $doc['id']]);
+                    }
+                }
+            }
+
+            // Process newly uploaded documents
+            if (!empty($_FILES)) {
+                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0777, true);
+                }
+
+                $filesToProcess = [];
+                foreach ($_FILES as $fileKey => $fileVal) {
+                    if (is_array($fileVal['name'])) {
+                        for ($i = 0; $i < count($fileVal['name']); $i++) {
+                            if ($fileVal['error'][$i] === UPLOAD_ERR_OK) {
+                                $filesToProcess[] = [
+                                    'name' => $fileVal['name'][$i],
+                                    'tmp_name' => $fileVal['tmp_name'][$i],
+                                ];
+                            }
+                        }
+                    } else {
+                        if ($fileVal['error'] === UPLOAD_ERR_OK) {
+                            $filesToProcess[] = [
+                                'name' => $fileVal['name'],
+                                'tmp_name' => $fileVal['tmp_name'],
+                            ];
+                        }
+                    }
+                }
+
+                foreach ($filesToProcess as $f) {
+                    $originalName = basename($f['name']);
+                    $extension = pathinfo($originalName, PATHINFO_EXTENSION);
+                    $filename = pathinfo($originalName, PATHINFO_FILENAME);
+                    $randomId = bin2hex(random_bytes(2));
+                    $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
+                    $targetPath = $uploadDir . $sanitizedName;
+
+                    if (move_uploaded_file($f['tmp_name'], $targetPath)) {
+                        $dbPath = 'public/bck/affiliator/protocols/' . $sanitizedName;
+
+                        $insStmt = $pdo->prepare("
+                            INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
+                            VALUES (:protocol_id, :document_path)
+                        ");
+                        $insStmt->execute([
+                            'protocol_id' => $id,
+                            'document_path' => $dbPath
+                        ]);
+                    }
+                }
+            }
+
+            // Retrieve updated row with documents
+            $finalDocStmt = $pdo->prepare("SELECT id, document_path FROM affiliator_protocol_documents WHERE protocol_id = :id");
+            $finalDocStmt->execute(['id' => $id]);
+            $updatedProtocol['documents'] = $finalDocStmt->fetchAll() ?: [];
             $updatedProtocol['status_id'] = StatusHelper::resolveStatus($updatedProtocol);
 
             (new ApiResponse(true, 'Protocol updated successfully', $updatedProtocol))->send(200);
