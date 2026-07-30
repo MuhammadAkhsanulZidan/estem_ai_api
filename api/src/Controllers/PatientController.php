@@ -38,32 +38,42 @@ class PatientController
                 $affiliatorId = $this->resolveAffiliatorId($user);
                 if (!$affiliatorId) {
                     (new ApiResponse(false, 'Akun pengguna tidak terasosiasi dengan institusi faskes'))->send(400);
+                    return;
                 }
             }
 
-            $sql = "
-                SELECT
-                    pe.*,
-                    ap.protocol_name,
-                    ap.protocol_version,
-                    ap.indication AS protocol_indication
-                FROM patient_ecrfs pe
-                JOIN admin_protocols ap ON pe.protocol_id = ap.id
+            $query = "
+                SELECT * FROM (
+                    SELECT
+                        pe.*,
+                        ap.protocol_name,
+                        ap.protocol_version,
+                        ap.indication AS protocol_indication
+                    FROM patient_ecrfs pe
+                    JOIN admin_protocols ap ON pe.protocol_id = ap.id
+                    ORDER BY pe.id DESC
+                ) A
             ";
 
-            if ($affiliatorId !== null) {
-                $sql .= " WHERE pe.affiliator_id = :affiliator_id";
-            }
-            $sql .= " ORDER BY pe.id DESC";
+            $tableName = "(SELECT pe.*, ap.protocol_name FROM patient_ecrfs pe JOIN admin_protocols ap ON pe.protocol_id = ap.id) A";
+            $queryWhere = "";
+            $params = [];
 
-            $stmt = $pdo->prepare($sql);
             if ($affiliatorId !== null) {
-                $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
+                $queryWhere = "AND affiliator_id = :affiliator_id";
+                $params['affiliator_id'] = $affiliatorId;
             }
-            $stmt->execute();
-            $patients = $stmt->fetchAll();
 
-            (new ApiResponse(true, 'Pasien berhasil dimuat', $patients))->send(200);
+            $responseData = RequestHelper::paginate(
+                pdo: $pdo,
+                query: $query,
+                tableName: $tableName,
+                queryWhere: $queryWhere,
+                filterFields: ['patient_initial', 'pic_doctor', 'registration_number', 'protocol_name'],
+                params: $params
+            );
+
+            (new ApiResponse(true, 'Pasien berhasil dimuat', $responseData))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
