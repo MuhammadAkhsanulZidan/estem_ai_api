@@ -55,12 +55,20 @@ use App\Controllers\AffiliatorProfileController;
 use App\Controllers\AdverseEventController;
 use App\Controllers\ChatbotController;
 use App\Controllers\AffiliatorSummaryController;
+use App\Controllers\AdminSummaryController;
 
 try {
     $router = new Router();
     $router->post('/v1/login', [AuthController::class, 'login']);
     $router->post('/v1/register-affiliator', [UserController::class, 'register_affiliator']);
     $router->post('/v1/register-reviewer', [UserController::class, 'register_reviewer']);
+
+    // Admin Report Summary / Analytics routes
+    $router->get('/v1/admin-summary/stats/protocols', [AdminSummaryController::class, 'protocols']);
+    $router->get('/v1/admin-summary/stats/patients', [AdminSummaryController::class, 'patients']);
+    $router->get('/v1/admin-summary/stats/adverse-events', [AdminSummaryController::class, 'adverseEvents']);
+    $router->get('/v1/admin-summary/reports/protocols', [AdminSummaryController::class, 'reportsProtocols']);
+
     $router->get('/v1/admin-protocols', [AdminProtocolController::class, 'get']);
     $router->post('/v1/admin-protocols', [AdminProtocolController::class, 'post']);
     $router->post('/v1/admin-protocols/update', [AdminProtocolController::class, 'put']);
