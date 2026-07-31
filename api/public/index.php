@@ -54,6 +54,7 @@ use App\Controllers\PatientController;
 use App\Controllers\AffiliatorProfileController;
 use App\Controllers\AdverseEventController;
 use App\Controllers\ChatbotController;
+use App\Controllers\AffiliatorSummaryController;
 
 try {
     $router = new Router();
