@@ -34,6 +34,8 @@ class AdverseEventController
             $filterValue = $_GET['filter_value'] ?? "";
             $status = $_GET['status'] ?? "";
             $protocolId = $_GET['protocol_id'] ?? "";
+            $startDate = $_GET['start_date'] ?? "";
+            $endDate = $_GET['end_date'] ?? "";
             $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
             $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 8;
 
@@ -54,6 +56,16 @@ class AdverseEventController
             if ($protocolId !== "" && $protocolId !== "semua") {
                 $conditions[] = "ae.protocol_id = :protocol_id";
                 $params['protocol_id'] = (int)$protocolId;
+            }
+
+            if (!empty($startDate)) {
+                $conditions[] = "ae.report_date >= :start_date";
+                $params['start_date'] = $startDate . ' 00:00:00';
+            }
+
+            if (!empty($endDate)) {
+                $conditions[] = "ae.report_date <= :end_date";
+                $params['end_date'] = $endDate . ' 23:59:59';
             }
 
             if ($filterValue !== "") {
