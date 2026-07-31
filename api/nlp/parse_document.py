@@ -80,6 +80,14 @@ def main():
                     "content": chunk.strip(),
                     "stemmed": stemmed_content
                 })
+
+        if output_chunks:
+            from sentence_transformers import SentenceTransformer
+            model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+            texts = [c['content'] for c in output_chunks]
+            embeddings = model.encode(texts).tolist()
+            for idx, emb in enumerate(embeddings):
+                output_chunks[idx]['embedding'] = emb
                 
         print(json.dumps({"success": True, "chunks": output_chunks}))
         

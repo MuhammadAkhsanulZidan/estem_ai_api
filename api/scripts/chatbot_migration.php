@@ -28,7 +28,8 @@ try {
             page_number INT NOT NULL,
             chunk_index INT NOT NULL,
             content TEXT NOT NULL,
-            search_vector TSVECTOR
+            search_vector TSVECTOR,
+            embedding REAL[]
         )
     ");
 
