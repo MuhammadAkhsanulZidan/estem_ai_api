@@ -219,42 +219,37 @@ class ChatbotController
         $queryOutput = shell_exec("{$this->pythonPath} {$queryScript} --query {$escapedQuery}");
         $queryResult = json_decode($queryOutput, true);
         
-        $stemmedQuery = $queryResult['stemmed_query'] ?? '';
-        
-        if (empty(trim($stemmedQuery))) {
-            return ["Maaf, kata kunci pencarian Anda terlalu umum. Silakan coba pertanyaan lain.", []];
+        if (!isset($queryResult['success']) || !$queryResult['success']) {
+            $errorMsg = $queryResult['error'] ?? 'Unknown script error';
+            return ["Maaf, terjadi kesalahan saat melakukan pencarian dokumen: $errorMsg", []];
         }
-
-        $sql = "
-            SELECT c.content, d.file_name, c.page_number, ts_rank_cd(c.search_vector, query) as rank
-            FROM chatbot_document_chunks c
-            JOIN chatbot_documents d ON c.document_id = d.id,
-            plainto_tsquery('simple', :stemmed) query
-            WHERE c.search_vector @@ query
-            ORDER BY rank DESC
-            LIMIT 3
-        ";
         
-        $matches = Database::fetchAll($sql, [':stemmed' => $stemmedQuery]);
+        $matches = $queryResult['matches'] ?? [];
         
-        if (empty($matches)) {
-            return ["Saya tidak dapat menemukan informasi terkait \"" . htmlspecialchars($queryText) . "\" di dokumen panduan stem cell yang tersedia.", []];
+        // Filter matches below similarity threshold (0.3)
+        $filteredMatches = array_filter($matches, function($match) {
+            return ($match['score'] ?? 0.0) >= 0.3;
+        });
+        
+        if (empty($filteredMatches)) {
+            return ["Saya tidak dapat menemukan informasi yang cukup relevan terkait \"" . htmlspecialchars($queryText) . "\" di dokumen panduan stem cell yang tersedia.", []];
         }
 
         $message = "Berdasarkan dokumen medis stem cell yang saya cari, berikut informasi yang relevan:\n\n";
-        foreach ($matches as $match) {
+        foreach ($filteredMatches as $match) {
             $docName = $match['file_name'];
             $page = $match['page_number'];
             $excerpt = trim($match['content']);
+            $score = round($match['score'] * 100, 1);
             
             // Generate link to specific PDF page served via Nginx alias
             $pdfLink = "/assets/" . urlencode($docName) . "#page=" . $page;
             
             $message .= "> ... " . $excerpt . " ...\n\n";
-            $message .= "*(Sumber: [" . $docName . "](" . $pdfLink . "), Halaman " . $page . ")*\n";
+            $message .= "*(Sumber: [" . $docName . "](" . $pdfLink . "), Halaman " . $page . " - Kecocokan: " . $score . "% )*\n";
             $message .= "---\n\n";
         }
         
-        return [$message, $matches];
+        return [$message, $filteredMatches];
     }
 }

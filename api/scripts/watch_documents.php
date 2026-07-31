@@ -29,6 +29,7 @@ foreach ($iterator as $file) {
         }
     }
 }
+$foundFiles = array_unique($foundFiles);
 
 echo "Found " . count($foundFiles) . " documents on disk.\n";
 
@@ -73,15 +74,17 @@ foreach ($foundFiles as $filePath) {
         echo "Successfully parsed $fileName into " . count($chunks) . " chunks.\n";
         
         foreach ($chunks as $chunk) {
+            $embeddingStr = isset($chunk['embedding']) ? '{' . implode(',', $chunk['embedding']) . '}' : null;
             Database::execute(
-                "INSERT INTO chatbot_document_chunks (document_id, page_number, chunk_index, content, search_vector) 
-                 VALUES (?, ?, ?, ?, to_tsvector('simple', ?))",
+                "INSERT INTO chatbot_document_chunks (document_id, page_number, chunk_index, content, search_vector, embedding) 
+                 VALUES (?, ?, ?, ?, to_tsvector('simple', ?), ?)",
                 [
                     $docId,
                     $chunk['page_number'],
                     $chunk['chunk_index'],
                     $chunk['content'],
-                    $chunk['stemmed']
+                    $chunk['stemmed'],
+                    $embeddingStr
                 ]
             );
         }
