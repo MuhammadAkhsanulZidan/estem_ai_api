@@ -141,7 +141,6 @@ class AdverseEventController
             $protocolId = $data['protocol_id'] ?? null;
             $eventType = trim($data['event_type'] ?? '');
             $severity = trim($data['severity'] ?? '');
-            $status = trim($data['status'] ?? 'Submitted');
             $actionTaken = trim($data['action_taken'] ?? '');
             $reporterName = trim($data['reporter_name'] ?? '');
             $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
@@ -161,11 +160,11 @@ class AdverseEventController
             $stmt = $pdo->prepare("
                 INSERT INTO adverse_events (
                     affiliator_id, report_number, patient_id, protocol_id,
-                    event_type, severity, status, action_taken, reporter_name,
+                    event_type, severity, action_taken, reporter_name,
                     is_finished, created_by, updated_by
                 ) VALUES (
                     :affiliator_id, :report_number, :patient_id, :protocol_id,
-                    :event_type, :severity, :status, :action_taken, :reporter_name,
+                    :event_type, :severity, :action_taken, :reporter_name,
                     :is_finished, :user_id, :user_id
                 ) RETURNING *
             ");
@@ -177,7 +176,6 @@ class AdverseEventController
                 'protocol_id'   => $protocolId,
                 'event_type'    => $eventType,
                 'severity'      => $severity,
-                'status'        => $status,
                 'action_taken'  => $actionTaken === '' ? null : $actionTaken,
                 'reporter_name' => $reporterName === '' ? null : $reporterName,
                 'is_finished'   => $isFinished ? 'true' : 'false',
@@ -187,63 +185,6 @@ class AdverseEventController
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
             (new ApiResponse(true, 'Adverse event reported successfully', $result))->send(201);
-
-        } catch (\Throwable $e) {
-            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
-        }
-    }
-
-    /**
-     * Submit a reviewer decision on an adverse event.
-     */
-    public function review()
-    {
-        $user = AuthMiddleware::authorize(['reviewer', 'admin']);
-
-        try {
-            $pdo = Database::getConnection();
-            $data = RequestHelper::getBody();
-
-            $id = $data['id'] ?? null;
-            $status = trim($data['status'] ?? '');
-            $reviewerNote = trim($data['reviewer_note'] ?? '');
-
-            if ($id === null || empty($status)) {
-                (new ApiResponse(false, 'Adverse event ID and Status are required.'))->send(400);
-                return;
-            }
-
-            // Allowed review statuses
-            if (!in_array($status, ['Submitted', 'Dalam Review', 'Need Clarification', 'Need Revision', 'Approved', 'Ditolak'])) {
-                (new ApiResponse(false, 'Invalid status.'))->send(400);
-                return;
-            }
-
-            $stmt = $pdo->prepare("
-                UPDATE adverse_events
-                SET status = :status,
-                    reviewer_note = :reviewer_note,
-                    updated_at = NOW(),
-                    updated_by = :user_id
-                WHERE id = :id
-                RETURNING *
-            ");
-
-            $stmt->execute([
-                'status'        => $status,
-                'reviewer_note' => $reviewerNote === '' ? null : $reviewerNote,
-                'user_id'       => $user['data']['id'],
-                'id'            => $id
-            ]);
-
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$result) {
-                (new ApiResponse(false, 'Adverse event record not found.'))->send(404);
-                return;
-            }
-
-            (new ApiResponse(true, 'Adverse event review decision submitted successfully', $result))->send(200);
 
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
