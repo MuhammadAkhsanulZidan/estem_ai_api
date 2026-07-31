@@ -262,16 +262,16 @@ class PatientEcrfController
                 $params['search'] = '%' . $searchTerm . '%';
             }
 
-            // Apply status filter
+            // Apply status filter matching flags pattern
             if ($status !== "all") {
-                if ($status === "submitted" || $status === "review") {
-                    $where .= " AND per.is_posted = TRUE AND per.is_approved = FALSE AND (per.reviewer_note IS NULL OR per.reviewer_note = '')";
+                if ($status === "submitted") {
+                    $where .= " AND per.is_posted = TRUE AND per.is_reviewed = FALSE";
+                } else if ($status === "review") {
+                    $where .= " AND per.is_posted = TRUE AND per.is_reviewed = TRUE AND per.is_revised = FALSE AND per.is_approved = FALSE";
                 } else if ($status === "revision") {
-                    $where .= " AND per.is_posted = TRUE AND per.is_approved = FALSE AND per.reviewer_note IS NOT NULL AND per.reviewer_note != ''";
+                    $where .= " AND per.is_revised = TRUE";
                 } else if ($status === "approved") {
                     $where .= " AND per.is_approved = TRUE";
-                } else if ($status === "rejected") {
-                    $where .= " AND per.is_posted = FALSE AND per.reviewer_note IS NOT NULL AND per.reviewer_note != ''";
                 }
             }
 
@@ -296,6 +296,8 @@ class PatientEcrfController
                     per.section_id,
                     per.is_posted,
                     per.is_approved,
+                    per.is_reviewed,
+                    per.is_revised,
                     per.reviewer_note,
                     per.answers_data,
                     per.updated_at AS submission_date,
