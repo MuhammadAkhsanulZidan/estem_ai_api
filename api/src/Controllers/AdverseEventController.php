@@ -145,7 +145,7 @@ class AdverseEventController
             $reporterName = trim($data['reporter_name'] ?? '');
             $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
 
-            if (empty($patientId) || empty($protocolId) || empty($eventType) || empty($severity)) {
+            if ($patientId === null || $protocolId === null || $eventType === '' || $severity === '') {
                 (new ApiResponse(false, 'patient_id, protocol_id, event_type, and severity are required'))->send(400);
                 return;
             }
@@ -185,6 +185,153 @@ class AdverseEventController
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
             (new ApiResponse(true, 'Adverse event reported successfully', $result))->send(201);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Update an existing adverse event.
+     */
+    public function put()
+    {
+        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $_GET['id'] ?? $data['id'] ?? null;
+            if ($id === null) {
+                (new ApiResponse(false, 'Adverse event ID is required.'))->send(400);
+                return;
+            }
+
+            // Fetch current record to verify ownership
+            $checkStmt = $pdo->prepare("SELECT affiliator_id FROM adverse_events WHERE id = :id");
+            $checkStmt->execute(['id' => $id]);
+            $aeRecord = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$aeRecord) {
+                (new ApiResponse(false, 'Adverse event record not found.'))->send(404);
+                return;
+            }
+
+            // Resolve affiliator_id of logged in user
+            $userId = $user['data']['id'];
+            $roles = $user['data']['roles'] ?? [];
+            $isAffiliator = in_array('affiliator', $roles);
+
+            if ($isAffiliator) {
+                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
+                $affStmt->execute(['user_id' => $userId]);
+                $affRow = $affStmt->fetch();
+                $userAffiliatorId = $affRow ? (int)$affRow['affiliator_id'] : null;
+
+                if ($userAffiliatorId === null || (int)$aeRecord['affiliator_id'] !== $userAffiliatorId) {
+                    (new ApiResponse(false, 'Forbidden: You do not own this adverse event record.'))->send(403);
+                    return;
+                }
+            }
+
+            // Get edit data
+            $patientId = $data['patient_id'] ?? null;
+            $protocolId = $data['protocol_id'] ?? null;
+            $eventType = isset($data['event_type']) ? trim($data['event_type']) : null;
+            $severity = isset($data['severity']) ? trim($data['severity']) : null;
+            $actionTaken = isset($data['action_taken']) ? trim($data['action_taken']) : null;
+            $reporterName = isset($data['reporter_name']) ? trim($data['reporter_name']) : null;
+            $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
+
+            if ($patientId === null || $protocolId === null || $eventType === '' || $severity === '') {
+                (new ApiResponse(false, 'patient_id, protocol_id, event_type, and severity are required.'))->send(400);
+                return;
+            }
+
+            $stmt = $pdo->prepare("
+                UPDATE adverse_events
+                SET patient_id = :patient_id,
+                    protocol_id = :protocol_id,
+                    event_type = :event_type,
+                    severity = :severity,
+                    action_taken = :action_taken,
+                    reporter_name = :reporter_name,
+                    is_finished = :is_finished,
+                    updated_at = NOW(),
+                    updated_by = :user_id
+                WHERE id = :id
+                RETURNING *
+            ");
+
+            $stmt->execute([
+                'patient_id'    => $patientId,
+                'protocol_id'   => $protocolId,
+                'event_type'    => $eventType,
+                'severity'      => $severity,
+                'action_taken'  => $actionTaken === '' ? null : $actionTaken,
+                'reporter_name' => $reporterName === '' ? null : $reporterName,
+                'is_finished'   => $isFinished ? 'true' : 'false',
+                'user_id'       => $userId,
+                'id'            => $id
+            ]);
+
+            $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            (new ApiResponse(true, 'Adverse event updated successfully', $updated))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Delete an adverse event record.
+     */
+    public function delete()
+    {
+        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $id = $_GET['id'] ?? null;
+
+            if ($id === null) {
+                (new ApiResponse(false, 'Adverse event ID is required.'))->send(400);
+                return;
+            }
+
+            // Fetch current record to verify ownership
+            $checkStmt = $pdo->prepare("SELECT affiliator_id FROM adverse_events WHERE id = :id");
+            $checkStmt->execute(['id' => $id]);
+            $aeRecord = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$aeRecord) {
+                (new ApiResponse(false, 'Adverse event record not found.'))->send(404);
+                return;
+            }
+
+            // Resolve affiliator_id of logged in user
+            $userId = $user['data']['id'];
+            $roles = $user['data']['roles'] ?? [];
+            $isAffiliator = in_array('affiliator', $roles);
+
+            if ($isAffiliator) {
+                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
+                $affStmt->execute(['user_id' => $userId]);
+                $affRow = $affStmt->fetch();
+                $userAffiliatorId = $affRow ? (int)$affRow['affiliator_id'] : null;
+
+                if ($userAffiliatorId === null || (int)$aeRecord['affiliator_id'] !== $userAffiliatorId) {
+                    (new ApiResponse(false, 'Forbidden: You do not own this adverse event record.'))->send(403);
+                    return;
+                }
+            }
+
+            $stmt = $pdo->prepare("DELETE FROM adverse_events WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+
+            (new ApiResponse(true, 'Adverse event deleted successfully'))->send(200);
 
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
