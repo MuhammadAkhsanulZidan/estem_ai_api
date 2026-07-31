@@ -4,12 +4,25 @@ namespace App\Controllers;
 
 use App\Config\Database;
 use App\Middleware\AuthMiddleware;
-use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+use App\Models\ApiResponse;
 use PDO;
 
 class AdverseEventController
 {
+    /**
+     * Resolve affiliator_id from user token.
+     */
+    private function resolveAffiliatorId(array $user): ?int
+    {
+        $pdo = Database::getConnection();
+        $userId = $user['data']['id'] ?? null;
+        $stmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+        $stmt->execute(['id' => $userId]);
+        $row = $stmt->fetch();
+        return $row ? (int)$row['affiliator_id'] : null;
+    }
+
     /**
      * Retrieve adverse events with pagination, filtering, and summary statistics.
      */
@@ -24,10 +37,7 @@ class AdverseEventController
             // Resolve affiliator_id if logged in as affiliator
             $affiliatorId = $_GET['affiliator_id'] ?? null;
             if ($affiliatorId === null && $user['data']['role_name'] === 'affiliator') {
-                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
-                $affStmt->execute(['user_id' => $userId]);
-                $affRow = $affStmt->fetch();
-                $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
+                $affiliatorId = $this->resolveAffiliatorId($user);
             }
 
             // Read filters
@@ -91,7 +101,7 @@ class AdverseEventController
 
             // Dynamic table expression for pagination counting
             $tableName = "(
-                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number
+                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number 
                 FROM adverse_events ae
                 LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
                 LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
@@ -125,11 +135,7 @@ class AdverseEventController
             $userId = $user['data']['id'];
 
             // Resolve affiliator_id
-            $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
-            $affStmt->execute(['user_id' => $userId]);
-            $affRow = $affStmt->fetch();
-            $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
-
+            $affiliatorId = $this->resolveAffiliatorId($user);
             if (!$affiliatorId) {
                 (new ApiResponse(false, 'User has no associated affiliator faskes.'))->send(403);
                 return;
@@ -224,12 +230,8 @@ class AdverseEventController
             $isAffiliator = in_array('affiliator', $roles);
 
             if ($isAffiliator) {
-                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
-                $affStmt->execute(['user_id' => $userId]);
-                $affRow = $affStmt->fetch();
-                $userAffiliatorId = $affRow ? (int)$affRow['affiliator_id'] : null;
-
-                if ($userAffiliatorId === null || (int)$aeRecord['affiliator_id'] !== $userAffiliatorId) {
+                $affiliatorId = $this->resolveAffiliatorId($user);
+                if ($affiliatorId === null || (int)$aeRecord['affiliator_id'] !== $affiliatorId) {
                     (new ApiResponse(false, 'Forbidden: You do not own this adverse event record.'))->send(403);
                     return;
                 }
@@ -317,12 +319,8 @@ class AdverseEventController
             $isAffiliator = in_array('affiliator', $roles);
 
             if ($isAffiliator) {
-                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
-                $affStmt->execute(['user_id' => $userId]);
-                $affRow = $affStmt->fetch();
-                $userAffiliatorId = $affRow ? (int)$affRow['affiliator_id'] : null;
-
-                if ($userAffiliatorId === null || (int)$aeRecord['affiliator_id'] !== $userAffiliatorId) {
+                $affiliatorId = $this->resolveAffiliatorId($user);
+                if ($affiliatorId === null || (int)$aeRecord['affiliator_id'] !== $affiliatorId) {
                     (new ApiResponse(false, 'Forbidden: You do not own this adverse event record.'))->send(403);
                     return;
                 }
@@ -332,6 +330,95 @@ class AdverseEventController
             $stmt->execute(['id' => $id]);
 
             (new ApiResponse(true, 'Adverse event deleted successfully'))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Get statistics for adverse events (status and severity counts).
+     */
+    public function stats()
+    {
+        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $affiliatorId = null;
+
+            if (in_array('affiliator', $user['data']['roles'] ?? [])) {
+                $affiliatorId = $this->resolveAffiliatorId($user);
+                if (!$affiliatorId) {
+                    (new ApiResponse(false, 'User has no associated affiliator faskes.'))->send(400);
+                    return;
+                }
+            }
+
+            // Filters
+            $protocolId = $_GET['protocol_id'] ?? "";
+            $startDate = $_GET['start_date'] ?? "";
+            $endDate = $_GET['end_date'] ?? "";
+
+            $conditions = [];
+            $params = [];
+
+            if ($affiliatorId !== null) {
+                $conditions[] = "affiliator_id = :affiliator_id";
+                $params['affiliator_id'] = $affiliatorId;
+            }
+
+            if ($protocolId !== "" && $protocolId !== "semua" && $protocolId !== "all") {
+                $conditions[] = "protocol_id = :protocol_id";
+                $params['protocol_id'] = (int)$protocolId;
+            }
+
+            if (!empty($startDate)) {
+                $conditions[] = "report_date >= :start_date";
+                $params['start_date'] = $startDate . ' 00:00:00';
+            }
+
+            if (!empty($endDate)) {
+                $conditions[] = "report_date <= :end_date";
+                $params['end_date'] = $endDate . ' 23:59:59';
+            }
+
+            $whereClause = "";
+            if (!empty($conditions)) {
+                $whereClause = "WHERE " . implode(" AND ", $conditions);
+            }
+
+            $sql = "
+                SELECT 
+                    COUNT(CASE WHEN is_finished = true THEN 1 END) as is_finished,
+                    COUNT(CASE WHEN is_finished = false THEN 1 END) as is_not_finished,
+                    COUNT(CASE WHEN severity = '0' OR severity = 'Ringan' THEN 1 END) as severity_0,
+                    COUNT(CASE WHEN severity = '1' OR severity = 'Sedang' THEN 1 END) as severity_1,
+                    COUNT(CASE WHEN severity = '2' OR severity = 'Serius (SAE)' THEN 1 END) as severity_2
+                FROM adverse_events
+                $whereClause
+            ";
+
+            $stmt = $pdo->prepare($sql);
+            foreach ($params as $key => $val) {
+                $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            }
+            $stmt->execute();
+            $stats = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            $responseData = [
+                'status' => [
+                    'is_finished' => (int)($stats['is_finished'] ?? 0),
+                    'is_not_finished' => (int)($stats['is_not_finished'] ?? 0)
+                ],
+                'severity' => [
+                    '0' => (int)($stats['severity_0'] ?? 0),
+                    '1' => (int)($stats['severity_1'] ?? 0),
+                    '2' => (int)($stats['severity_2'] ?? 0)
+                ]
+            ];
+
+            (new ApiResponse(true, 'Adverse event stats retrieved successfully', $responseData))->send(200);
 
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
