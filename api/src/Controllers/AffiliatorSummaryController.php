@@ -183,14 +183,17 @@ class AffiliatorSummaryController
                 SELECT 
                     'Pengampuan' as type, COALESCE(pic_name, 'Pengampuan Pelayanan Sel Punca') as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id
                 FROM affiliator_supervisions
-            ) AS u {$statusWhere}";
+            ) AS u";
+
+            $queryWhere = "AND " . implode(" AND ", $statusConditions);
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,
                 query: $query,
                 tableName: $tableName,
-                params: $params,
-                filterFields: ['title', 'type']
+                queryWhere: $queryWhere,
+                filterFields: ['title', 'type'],
+                params: $params
             );
 
             (new ApiResponse(true, 'Status pengajuan retrieved successfully', $responseData))->send(200);
