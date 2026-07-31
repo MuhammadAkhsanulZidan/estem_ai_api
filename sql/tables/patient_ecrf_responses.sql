@@ -3,7 +3,7 @@ DROP TABLE IF EXISTS patient_ecrf_responses CASCADE;
 CREATE TABLE patient_ecrf_responses (
     id SERIAL PRIMARY KEY,
     patient_id INT NOT NULL REFERENCES patient_ecrfs(id) ON DELETE CASCADE,
-    protocol_id INT NOT NULL REFERENCES admin_protocols(id) ON DELETE CASCADE,
+    protocol_id INT NOT NULL REFERENCES affiliator_protocols(id) ON DELETE CASCADE,
     section_id INT NOT NULL REFERENCES ecrf_sections(id) ON DELETE CASCADE,
     answers_data JSONB DEFAULT '{}'::jsonb,
     is_posted BOOLEAN NOT NULL DEFAULT FALSE,
