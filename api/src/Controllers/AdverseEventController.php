@@ -31,13 +31,10 @@ class AdverseEventController
             }
 
             // Read filters
-            $filterValue = $_GET['filter_value'] ?? "";
             $status = $_GET['status'] ?? "";
             $protocolId = $_GET['protocol_id'] ?? "";
             $startDate = $_GET['start_date'] ?? "";
             $endDate = $_GET['end_date'] ?? "";
-            $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
-            $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 8;
 
             // Build conditions
             $conditions = [];
@@ -68,12 +65,10 @@ class AdverseEventController
                 $params['end_date'] = $endDate . ' 23:59:59';
             }
 
-            if ($filterValue !== "") {
-                $conditions[] = "(ae.event_type ILIKE :val OR p.patient_initial ILIKE :val OR p.registration_number ILIKE :val OR aff.affiliator_name ILIKE :val OR ae.report_number ILIKE :val)";
-                $params['val'] = '%' . $filterValue . '%';
+            $customWhere = "";
+            if (!empty($conditions)) {
+                $customWhere = "WHERE " . implode(" AND ", $conditions);
             }
-
-            $whereClause = !empty($conditions) ? "WHERE " . implode(" AND ", $conditions) : "";
 
             // Query Statistics matching review statuses
             $statConditions = [];
@@ -99,70 +94,50 @@ class AdverseEventController
             $statStmt->execute($statParams);
             $stats = $statStmt->fetch(PDO::FETCH_ASSOC);
 
-            // 1. Get total items count
-            $countQuery = "
-                SELECT COUNT(*) 
-                FROM adverse_events ae
-                LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
-                LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
-                $whereClause
-            ";
-            $stmt = $pdo->prepare($countQuery);
-            foreach ($params as $key => $val) {
-                $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-            }
-            $stmt->execute();
-            $totalItems = (int)$stmt->fetchColumn();
-
-            // 2. Get paginated results
+            // Base query with custom filters inside the subquery
             $query = "
-                SELECT
-                    ae.*,
-                    p.patient_initial,
-                    p.registration_number as patient_registration_number,
-                    ap.protocol_name,
-                    ap.protocol_version,
-                    aff.affiliator_name as hospital_name
-                FROM adverse_events ae
-                LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
-                LEFT JOIN admin_protocols ap ON ae.protocol_id = ap.id
-                LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
-                $whereClause
-                ORDER BY ae.id DESC
+                SELECT * FROM (
+                    SELECT
+                        ae.*,
+                        p.patient_initial,
+                        p.registration_number as patient_registration_number,
+                        ap.protocol_name,
+                        ap.protocol_version,
+                        aff.affiliator_name as hospital_name
+                    FROM adverse_events ae
+                    LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
+                    LEFT JOIN admin_protocols ap ON ae.protocol_id = ap.id
+                    LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
+                    {$customWhere}
+                    ORDER BY ae.id DESC
+                ) A
             ";
 
-            $useLimit = $pageNo > 0 && $pageRow > 0;
-            if ($useLimit) {
-                $offset = ($pageNo - 1) * $pageRow;
-                $query .= " LIMIT :limit OFFSET :offset";
-            }
+            // Dynamic table expression for pagination counting
+            $tableName = "(
+                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number 
+                FROM adverse_events ae
+                LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
+                LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
+                {$customWhere}
+            ) A";
 
-            $stmt = $pdo->prepare($query);
-            foreach ($params as $key => $val) {
-                $stmt->bindValue(':' . $key, $val, is_int($val) ? PDO::PARAM_INT : PDO::PARAM_STR);
-            }
-            if ($useLimit) {
-                $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
-                $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-            }
+            $responseData = RequestHelper::paginate(
+                pdo: $pdo,
+                query: $query,
+                tableName: $tableName,
+                params: $params,
+                filterFields: ['event_type', 'patient_initial', 'registration_number', 'affiliator_name', 'report_number']
+            );
 
-            $stmt->execute();
-            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            $responseData = [
-                'items'       => $items,
-                'total_items' => $totalItems,
-                'page_no'     => $pageNo,
-                'page_row'    => $pageRow,
-                'stats'       => [
-                    'total'         => (int)($stats['total'] ?? 0),
-                    'submitted'     => (int)($stats['submitted'] ?? 0),
-                    'review'        => (int)($stats['review'] ?? 0),
-                    'clarification' => (int)($stats['clarification'] ?? 0),
-                    'revision'      => (int)($stats['revision'] ?? 0),
-                    'approved'      => (int)($stats['approved'] ?? 0),
-                    'rejected'      => (int)($stats['rejected'] ?? 0)
-                ]
+            $responseData['stats'] = [
+                'total'         => (int)($stats['total'] ?? 0),
+                'submitted'     => (int)($stats['submitted'] ?? 0),
+                'review'        => (int)($stats['review'] ?? 0),
+                'clarification' => (int)($stats['clarification'] ?? 0),
+                'revision'      => (int)($stats['revision'] ?? 0),
+                'approved'      => (int)($stats['approved'] ?? 0),
+                'rejected'      => (int)($stats['rejected'] ?? 0)
             ];
 
             (new ApiResponse(true, 'Adverse events retrieved successfully', $responseData))->send(200);
