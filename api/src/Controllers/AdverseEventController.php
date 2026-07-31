@@ -144,9 +144,10 @@ class AdverseEventController
             $status = trim($data['status'] ?? 'Submitted');
             $actionTaken = trim($data['action_taken'] ?? '');
             $reporterName = trim($data['reporter_name'] ?? '');
+            $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
 
-            if (!$patientId || !$protocolId || empty($eventType) || empty($severity)) {
-                (new ApiResponse(false, 'patient_id, protocol_id, event_type, and severity are required.'))->send(400);
+            if (empty($patientId) || empty($protocolId) || empty($eventType) || empty($severity)) {
+                (new ApiResponse(false, 'patient_id, protocol_id, event_type, and severity are required'))->send(400);
                 return;
             }
 
@@ -161,11 +162,11 @@ class AdverseEventController
                 INSERT INTO adverse_events (
                     affiliator_id, report_number, patient_id, protocol_id,
                     event_type, severity, status, action_taken, reporter_name,
-                    created_by, updated_by
+                    is_finished, created_by, updated_by
                 ) VALUES (
                     :affiliator_id, :report_number, :patient_id, :protocol_id,
                     :event_type, :severity, :status, :action_taken, :reporter_name,
-                    :user_id, :user_id
+                    :is_finished, :user_id, :user_id
                 ) RETURNING *
             ");
 
@@ -179,6 +180,7 @@ class AdverseEventController
                 'status'        => $status,
                 'action_taken'  => $actionTaken === '' ? null : $actionTaken,
                 'reporter_name' => $reporterName === '' ? null : $reporterName,
+                'is_finished'   => $isFinished ? 'true' : 'false',
                 'user_id'       => $userId
             ]);
 
