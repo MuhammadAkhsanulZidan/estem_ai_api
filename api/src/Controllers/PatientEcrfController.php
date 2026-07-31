@@ -196,28 +196,73 @@ class PatientEcrfController
             $userId = $user['data']['id'];
             $jsonAnswers = json_encode($answersData);
 
-            // 3. PostgreSQL UPSERT
-            $stmt = $pdo->prepare("
-                INSERT INTO patient_ecrf_responses (patient_id, protocol_id, section_id, answers_data, is_posted, created_by, updated_by, created_at, updated_at)
-                VALUES (:patient_id, :protocol_id, :section_id, :answers_data::jsonb, :is_posted, :user_id, :user_id, NOW(), NOW())
-                ON CONFLICT (patient_id, protocol_id, section_id)
-                DO UPDATE SET
-                    answers_data = EXCLUDED.answers_data,
-                    is_posted = EXCLUDED.is_posted,
-                    updated_by = EXCLUDED.updated_by,
-                    updated_at = NOW()
-                RETURNING *
-            ");
-
-            // FIX: Pass the array of parameters to execute()
+            // 1. Check if response already exists
+            $stmt = $pdo->prepare("SELECT * FROM patient_ecrf_responses WHERE patient_id = :patient_id AND protocol_id = :protocol_id AND section_id = :section_id");
             $stmt->execute([
-                'patient_id'   => $patientId,
-                'protocol_id'  => $protocolId,
-                'section_id'   => $sectionId,
-                'answers_data' => $jsonAnswers,
-                'is_posted'    => $isPosted ? 'true' : 'false',
-                'user_id'      => $userId,
+                'patient_id'  => $patientId,
+                'protocol_id' => $protocolId,
+                'section_id'  => $sectionId
             ]);
+            $existing = $stmt->fetch();
+
+            // 2. Map flags depending on submission state
+            $isReviewed = $existing ? $existing['is_reviewed'] : false;
+            $isRevised = $existing ? $existing['is_revised'] : false;
+            $isApproved = $existing ? $existing['is_approved'] : false;
+            $reviewerNote = $existing ? $existing['reviewer_note'] : null;
+
+            if ($isPosted) {
+                // If submitted, reset review status flags back to false
+                $isReviewed = false;
+                $isRevised = false;
+                $isApproved = false;
+                $reviewerNote = null;
+            }
+
+            // 3. Insert or Update depending on existence (Standard pattern)
+            if ($existing) {
+                $stmt = $pdo->prepare("
+                    UPDATE patient_ecrf_responses
+                    SET answers_data = :answers_data::jsonb,
+                        is_posted = :is_posted,
+                        is_reviewed = :is_reviewed,
+                        is_revised = :is_revised,
+                        is_approved = :is_approved,
+                        reviewer_note = :reviewer_note,
+                        updated_by = :user_id,
+                        updated_at = NOW()
+                    WHERE id = :id
+                    RETURNING *
+                ");
+                $stmt->execute([
+                    'answers_data' => $jsonAnswers,
+                    'is_posted'    => $isPosted ? 'true' : 'false',
+                    'is_reviewed'  => $isReviewed ? 'true' : 'false',
+                    'is_revised'   => $isRevised ? 'true' : 'false',
+                    'is_approved'  => $isApproved ? 'true' : 'false',
+                    'reviewer_note'=> $reviewerNote,
+                    'user_id'      => $userId,
+                    'id'           => $existing['id']
+                ]);
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO patient_ecrf_responses (patient_id, protocol_id, section_id, answers_data, is_posted, is_reviewed, is_revised, is_approved, reviewer_note, created_by, updated_by, created_at, updated_at)
+                    VALUES (:patient_id, :protocol_id, :section_id, :answers_data::jsonb, :is_posted, :is_reviewed, :is_revised, :is_approved, :reviewer_note, :user_id, :user_id, NOW(), NOW())
+                    RETURNING *
+                ");
+                $stmt->execute([
+                    'patient_id'   => $patientId,
+                    'protocol_id'  => $protocolId,
+                    'section_id'   => $sectionId,
+                    'answers_data' => $jsonAnswers,
+                    'is_posted'    => $isPosted ? 'true' : 'false',
+                    'is_reviewed'  => $isReviewed ? 'true' : 'false',
+                    'is_revised'   => $isRevised ? 'true' : 'false',
+                    'is_approved'  => $isApproved ? 'true' : 'false',
+                    'reviewer_note'=> $reviewerNote,
+                    'user_id'      => $userId,
+                ]);
+            }
             $result = $stmt->fetch();
 
             (new ApiResponse(true, 'Answers saved successfully', $result))->send(200);
