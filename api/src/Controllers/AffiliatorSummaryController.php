@@ -105,7 +105,8 @@ class AffiliatorSummaryController
                         is_revised,
                         is_approved,
                         affiliator_id,
-                        reference_id as reg_number
+                        reference_id as reg_number,
+                        NULL::integer as patient_id
                     FROM (
                         SELECT ap.*, adm.reference_id 
                         FROM affiliator_protocols ap
@@ -123,7 +124,8 @@ class AffiliatorSummaryController
                         COALESCE(r.is_revised, false) as is_revised,
                         COALESCE(r.is_approved, false) as is_approved,
                         pe.affiliator_id,
-                        registration_number as reg_number
+                        registration_number as reg_number,
+                        pe.id as patient_id
                     FROM patient_ecrfs pe
                     LEFT JOIN (
                         SELECT 
@@ -147,7 +149,8 @@ class AffiliatorSummaryController
                         is_revised,
                         is_approved,
                         affiliator_id,
-                        reference_id as reg_number
+                        reference_id as reg_number,
+                        NULL::integer as patient_id
                     FROM affiliator_supervisions
                 ) AS u
                 {$statusWhere}
@@ -156,7 +159,7 @@ class AffiliatorSummaryController
 
             $tableName = "(
                 SELECT 
-                    'Protokol' as type, protocol_name as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id
+                    'Protokol' as type, protocol_name as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id, NULL::integer as patient_id
                 FROM affiliator_protocols
                 UNION ALL
                 SELECT 
@@ -167,7 +170,8 @@ class AffiliatorSummaryController
                     COALESCE(r.is_reviewed, false) as is_reviewed,
                     COALESCE(r.is_revised, false) as is_revised,
                     COALESCE(r.is_approved, false) as is_approved,
-                    pe.affiliator_id
+                    pe.affiliator_id,
+                    pe.id as patient_id
                 FROM patient_ecrfs pe
                 LEFT JOIN (
                     SELECT 
@@ -181,7 +185,7 @@ class AffiliatorSummaryController
                 ) r ON pe.id = r.patient_id
                 UNION ALL
                 SELECT 
-                    'Pengampuan' as type, COALESCE(pic_name, 'Pengampuan Pelayanan Sel Punca') as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id
+                    'Pengampuan' as type, COALESCE(pic_name, 'Pengampuan Pelayanan Sel Punca') as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id, NULL::integer as patient_id
                 FROM affiliator_supervisions
             ) AS u";
 
@@ -193,7 +197,30 @@ class AffiliatorSummaryController
                 tableName: $tableName,
                 queryWhere: $queryWhere,
                 filterFields: ['title', 'type'],
-                params: $params
+                params: $params,
+                mutateItems: function ($items) use ($pdo) {
+                    foreach ($items as &$item) {
+                        $item['sections'] = [];
+                        if ($item['type'] === 'eCRF Pasien' && !empty($item['patient_id'])) {
+                            $stmt = $pdo->prepare("
+                                SELECT 
+                                    es.id as section_id,
+                                    es.section_name,
+                                    COALESCE(r.is_posted, false) as is_posted,
+                                    COALESCE(r.is_reviewed, false) as is_reviewed,
+                                    COALESCE(r.is_revised, false) as is_revised,
+                                    COALESCE(r.is_approved, false) as is_approved
+                                FROM ecrf_sections es
+                                LEFT JOIN patient_ecrf_responses r 
+                                    ON es.id = r.section_id AND r.patient_id = :patient_id
+                                ORDER BY es.id ASC
+                            ");
+                            $stmt->execute(['patient_id' => $item['patient_id']]);
+                            $item['sections'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        }
+                    }
+                    return $items;
+                }
             );
 
             (new ApiResponse(true, 'Status pengajuan retrieved successfully', $responseData))->send(200);
