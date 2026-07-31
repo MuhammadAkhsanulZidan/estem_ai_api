@@ -10,96 +10,190 @@ use PDO;
 
 class AffiliatorSummaryController
 {
-    public function statusPengajuan(){
+    private function resolveAffiliatorId(array $user): ?int
+    {
+        $pdo = Database::getConnection();
+        $userId = $user['data']['id'] ?? null;
+        $stmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+        $stmt->execute(['id' => $userId]);
+        $row = $stmt->fetch();
+        return $row ? (int)$row['affiliator_id'] : null;
+    }
+
+    public function statusPengajuan()
+    {
+        $user = AuthMiddleware::authorize(['affiliator']);
+
         try {
-            $user = AuthMiddleware::authorize(['affiliator']);
             $pdo = Database::getConnection();
 
-            $params = [];
-            $statusConditions = [];
+            // Securely resolve affiliator_id from JWT payload or DB fallback
+            $affiliatorId = $user['data']['affiliator_id'] ?? null;
+            if ($affiliatorId === null) {
+                $affiliatorId = $this->resolveAffiliatorId($user);
+            }
 
-            $affiliatorId   = $_GET['affiliator_id'];
+            if (!$affiliatorId) {
+                (new ApiResponse(false, 'User has no associated affiliator faskes.'))->send(403);
+                return;
+            }
+
             $isPosted   = $_GET['is_posted'] ?? "";
             $isRevised  = $_GET['is_revised'] ?? "";
             $isReviewed = $_GET['is_reviewed'] ?? "";
             $isApproved = $_GET['is_approved'] ?? "";
+            $status     = $_GET['status'] ?? "";
+            $type       = $_GET['type'] ?? "";
+            $search     = $_GET['search'] ?? "";
+            $startDate  = $_GET['start_date'] ?? "";
+            $endDate    = $_GET['end_date'] ?? "";
 
-            // Status Filters
-            $statusConditions[] = "affiliator_id = :affiliator_id";
-            $params['affiliator_id'] = $affiliatorId;
+            $params = [
+                'affiliator_id' => $affiliatorId
+            ];
 
-            if ($isPosted !== ""){
-                $statusConditions[] = "is_posted = :is_posted";
-                $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
-            }
-            if ($isReviewed !== ""){
-                $statusConditions[] = "is_reviewed = :is_reviewed";
-                $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
-            }
-            if ($isRevised !== ""){
-                $statusConditions[] = "is_revised = :is_revised";
-                $params['is_revised'] = ($isRevised === "1" || $isRevised === "true") ? 'true' : 'false';
-            }
-            if ($isApproved !== ""){
-                $statusConditions[] = "is_approved = :is_approved";
-                $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
-            }
+            $statusConditions = [
+                "affiliator_id = :affiliator_id"
+            ];
 
-            $statusWhere = "";
-            if (!empty($statusConditions)) {
-                $statusWhere = "WHERE " . implode(" AND ", $statusConditions);
+            // Resolve simplified status codes
+            if ($status !== "" && $status !== "Semua Status") {
+                if ($status === "Draft" || $status === "draft") {
+                    $statusConditions[] = "is_posted = false";
+                } elseif ($status === "Menunggu Review" || $status === "submitted" || $status === "pending") {
+                    $statusConditions[] = "is_posted = true AND is_reviewed = false";
+                } elseif ($status === "Revisi" || $status === "revisi" || $status === "need_revision") {
+                    $statusConditions[] = "is_posted = true AND is_reviewed = true AND is_approved = false AND is_revised = true";
+                } elseif ($status === "Approved" || $status === "approved") {
+                    $statusConditions[] = "is_posted = true AND is_reviewed = true AND is_approved = true";
+                } elseif ($status === "Rejected" || $status === "rejected") {
+                    $statusConditions[] = "is_posted = true AND is_reviewed = true AND is_approved = false AND is_revised = false";
+                }
             }
 
-            // Base query with status filtering inside the inner query
+            if ($type !== "" && $type !== "Semua Jenis") {
+                $statusConditions[] = "type = :type";
+                $params['type'] = $type;
+            }
+
+            if (!empty($startDate)) {
+                $statusConditions[] = "date >= :start_date";
+                $params['start_date'] = $startDate . ' 00:00:00';
+            }
+
+            if (!empty($endDate)) {
+                $statusConditions[] = "date <= :end_date";
+                $params['end_date'] = $endDate . ' 23:59:59';
+            }
+
+            if (!empty($search)) {
+                $statusConditions[] = "(title ILIKE :search OR type ILIKE :search)";
+                $params['search'] = '%' . $search . '%';
+            }
+
+            $statusWhere = "WHERE " . implode(" AND ", $statusConditions);
+
+            // Union all pengajuan submissions
             $query = "
-                SELECT 'Protokol' as type,
-                protocol_name as title,
-                create_date as date,
-                is_posted,
-                is_reviewed,
-                is_revised,
-                is_approved
-                FROM affiliator_protocols
-                UNION
-                SELECT 'eCRF Pasien' as type,
-                protocol_id as title,
-                create_date as date,
-                is_posted,
-                is_reviewed,
-                is_revised,
-                is_approved
-                FROM patient_ecrfs
-                UNION
-                SELECT 'Pengampuan' as type,
-                '' as title,
-                create_date as date,
-                is_posted,
-                is_reviewed,
-                is_revised,
-                is_approved
-                FROM affiliator_supervision
+                SELECT * FROM (
+                    SELECT 
+                        'Protokol' as type,
+                        protocol_name as title,
+                        created_at as date,
+                        is_posted,
+                        is_reviewed,
+                        is_revised,
+                        is_approved,
+                        affiliator_id,
+                        reference_id as reg_number
+                    FROM (
+                        SELECT ap.*, adm.reference_id 
+                        FROM affiliator_protocols ap
+                        LEFT JOIN admin_protocols adm ON ap.protocol_reference_id = adm.id
+                    ) p
+                    
+                    UNION ALL
+                    
+                    SELECT 
+                        'eCRF Pasien' as type,
+                        patient_initial || ' (' || registration_number || ')' as title,
+                        pe.created_at as date,
+                        COALESCE(r.is_posted, false) as is_posted,
+                        COALESCE(r.is_reviewed, false) as is_reviewed,
+                        COALESCE(r.is_revised, false) as is_revised,
+                        COALESCE(r.is_approved, false) as is_approved,
+                        pe.affiliator_id,
+                        registration_number as reg_number
+                    FROM patient_ecrfs pe
+                    LEFT JOIN (
+                        SELECT 
+                            patient_id,
+                            bool_and(is_posted) as is_posted,
+                            bool_and(is_reviewed) as is_reviewed,
+                            bool_or(is_revised) as is_revised,
+                            bool_and(is_approved) as is_approved
+                        FROM patient_ecrf_responses
+                        GROUP BY patient_id
+                    ) r ON pe.id = r.patient_id
+                    
+                    UNION ALL
+                    
+                    SELECT 
+                        'Pengampuan' as type,
+                        COALESCE(pic_name, 'Pengampuan Pelayanan Sel Punca') as title,
+                        created_at as date,
+                        is_posted,
+                        is_reviewed,
+                        is_revised,
+                        is_approved,
+                        affiliator_id,
+                        reference_id as reg_number
+                    FROM affiliator_supervisions
+                ) AS u
                 {$statusWhere}
+                ORDER BY date DESC
             ";
 
-            // Dynamic table expression for pagination counting
-            $tableName = "";
+            $tableName = "(
+                SELECT 
+                    'Protokol' as type, protocol_name as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id
+                FROM affiliator_protocols
+                UNION ALL
+                SELECT 
+                    'eCRF Pasien' as type,
+                    patient_initial || ' (' || registration_number || ')' as title,
+                    pe.created_at as date,
+                    COALESCE(r.is_posted, false) as is_posted,
+                    COALESCE(r.is_reviewed, false) as is_reviewed,
+                    COALESCE(r.is_revised, false) as is_revised,
+                    COALESCE(r.is_approved, false) as is_approved,
+                    pe.affiliator_id
+                FROM patient_ecrfs pe
+                LEFT JOIN (
+                    SELECT 
+                        patient_id,
+                        bool_and(is_posted) as is_posted,
+                        bool_and(is_reviewed) as is_reviewed,
+                        bool_or(is_revised) as is_revised,
+                        bool_and(is_approved) as is_approved
+                    FROM patient_ecrf_responses
+                    GROUP BY patient_id
+                ) r ON pe.id = r.patient_id
+                UNION ALL
+                SELECT 
+                    'Pengampuan' as type, COALESCE(pic_name, 'Pengampuan Pelayanan Sel Punca') as title, created_at as date, is_posted, is_reviewed, is_revised, is_approved, affiliator_id
+                FROM affiliator_supervisions
+            ) AS u {$statusWhere}";
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,
                 query: $query,
                 tableName: $tableName,
                 params: $params,
-                filterFields: ['protocol_name', 'affiliator_name'],
-                mutateItems: function ($items) {
-                    foreach ($items as &$p) {
-                        $p['documents'] = json_decode($p['documents'] ?? '[]', true);
-                        $p['status_id'] = StatusHelper::resolveStatus($p);
-                    }
-                    return $items;
-                }
+                filterFields: ['title', 'type']
             );
 
-            (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
+            (new ApiResponse(true, 'Status pengajuan retrieved successfully', $responseData))->send(200);
 
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);

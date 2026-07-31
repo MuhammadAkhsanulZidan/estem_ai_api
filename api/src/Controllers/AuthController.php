@@ -56,7 +56,8 @@ class AuthController {
                     'data' => [
                         'id' => $user['id'],
                         'username' => $user['username'],
-                        'role_name'=> $user['role_name']
+                        'role_name'=> $user['role_name'],
+                        'affiliator_id' => $user['affiliator_id'] !== null ? (int)$user['affiliator_id'] : null
                     ]
                 ];
 
@@ -68,7 +69,8 @@ class AuthController {
                     'data' => [
                         'id' => $user['id'],
                         'username' => $user['username'],
-                        'role_name'=> $user['role_name']
+                        'role_name'=> $user['role_name'],
+                        'affiliator_id' => $user['affiliator_id'] !== null ? (int)$user['affiliator_id'] : null
                     ]
                 ];
 
