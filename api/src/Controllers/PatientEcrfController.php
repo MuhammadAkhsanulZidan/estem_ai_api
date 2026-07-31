@@ -237,7 +237,7 @@ class PatientEcrfController
             $pdo = Database::getConnection();
 
             $searchTerm = $_GET['filter_value'] ?? "";
-            $status = $_GET['status'] ?? "Semua"; // Semua, submitted, review, revision, approved, rejected
+            $status = $_GET['status'] ?? "all"; // all, submitted, review, revision, approved, rejected
             $pageNo = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
             $pageRow = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
             $startDate = $_GET['start_date'] ?? "";
@@ -263,7 +263,7 @@ class PatientEcrfController
             }
 
             // Apply status filter
-            if ($status !== "Semua") {
+            if ($status !== "all") {
                 if ($status === "submitted" || $status === "review") {
                     $where .= " AND per.is_posted = TRUE AND per.is_approved = FALSE AND (per.reviewer_note IS NULL OR per.reviewer_note = '')";
                 } else if ($status === "revision") {
@@ -280,7 +280,7 @@ class PatientEcrfController
                 SELECT COUNT(*)
                 FROM patient_ecrf_responses per
                 JOIN patient_ecrfs pe ON per.patient_id = pe.id
-                JOIN admin_protocols ap ON per.protocol_id = ap.id
+                JOIN affiliator_protocols ap ON per.protocol_id = ap.id
                 JOIN ecrf_sections es ON per.section_id = es.id
                 $where
             ");
@@ -309,9 +309,9 @@ class PatientEcrfController
                     ape.questions_schema
                 FROM patient_ecrf_responses per
                 JOIN patient_ecrfs pe ON per.patient_id = pe.id
-                JOIN admin_protocols ap ON per.protocol_id = ap.id
+                JOIN affiliator_protocols ap ON per.protocol_id = ap.id
                 JOIN ecrf_sections es ON per.section_id = es.id
-                LEFT JOIN admin_protocol_ecrfs ape ON per.protocol_id = ape.protocol_id AND per.section_id = ape.section_id
+                LEFT JOIN admin_protocol_ecrfs ape ON ap.protocol_reference_id = ape.protocol_id AND per.section_id = ape.section_id
                 $where
                 ORDER BY per.updated_at DESC
                 LIMIT :limit OFFSET :offset
