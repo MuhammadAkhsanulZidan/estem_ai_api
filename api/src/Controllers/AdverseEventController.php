@@ -31,7 +31,7 @@ class AdverseEventController
             }
 
             // Read filters
-            $status = $_GET['status'] ?? "";
+            $isFinished = $_GET['is_finished'] ?? "";
             $protocolId = $_GET['protocol_id'] ?? "";
             $startDate = $_GET['start_date'] ?? "";
             $endDate = $_GET['end_date'] ?? "";
@@ -43,11 +43,6 @@ class AdverseEventController
             if ($affiliatorId !== null) {
                 $conditions[] = "ae.affiliator_id = :affiliator_id";
                 $params['affiliator_id'] = $affiliatorId;
-            }
-
-            if ($status !== "" && strtolower($status) !== 'semua status' && strtolower($status) !== 'semua') {
-                $conditions[] = "ae.status = :status";
-                $params['status'] = $status;
             }
 
             if ($protocolId !== "" && $protocolId !== "semua") {
@@ -65,6 +60,11 @@ class AdverseEventController
                 $params['end_date'] = $endDate . ' 23:59:59';
             }
 
+            if (!empty($isFinished)) {
+                $conditions[] = "ae.is_finished = :is_finished";
+                $params['is_finished'] = $isFinished == "1" ? "true" : "false";
+            }
+
             $customWhere = "";
             if (!empty($conditions)) {
                 $customWhere = "WHERE " . implode(" AND ", $conditions);
@@ -79,10 +79,10 @@ class AdverseEventController
                         p.registration_number as patient_registration_number,
                         ap.protocol_name,
                         ap.protocol_version,
-                        aff.affiliator_name as hospital_name
+                        aff.affiliator_name
                     FROM adverse_events ae
                     LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
-                    LEFT JOIN admin_protocols ap ON ae.protocol_id = ap.id
+                    LEFT JOIN affiliator_protocols ap ON ae.protocol_id = ap.id
                     LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
                     {$customWhere}
                     ORDER BY ae.id DESC
@@ -91,7 +91,7 @@ class AdverseEventController
 
             // Dynamic table expression for pagination counting
             $tableName = "(
-                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number 
+                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number
                 FROM adverse_events ae
                 LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
                 LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
@@ -103,7 +103,7 @@ class AdverseEventController
                 query: $query,
                 tableName: $tableName,
                 params: $params,
-                filterFields: ['event_type', 'patient_initial', 'registration_number', 'affiliator_name', 'report_number']
+                filterFields: ['patient_initial', 'affiliator_name']
             );
 
             (new ApiResponse(true, 'Adverse events retrieved successfully', $responseData))->send(200);
