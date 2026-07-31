@@ -107,6 +107,7 @@ try {
     $router->put('/v1/patients', [PatientController::class, 'put']);
     $router->get('/v1/patients/next-registration-number', [PatientController::class, 'getNextRegistrationNumber']);
 
+    $router->get('/v1/adverse-events/stats', [AdverseEventController::class, 'stats']);
     $router->get('/v1/adverse-events', [AdverseEventController::class, 'get']);
     $router->post('/v1/adverse-events', [AdverseEventController::class, 'post']);
     $router->put('/v1/adverse-events', [AdverseEventController::class, 'put']);
