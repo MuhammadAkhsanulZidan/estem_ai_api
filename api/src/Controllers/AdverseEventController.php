@@ -70,30 +70,6 @@ class AdverseEventController
                 $customWhere = "WHERE " . implode(" AND ", $conditions);
             }
 
-            // Query Statistics matching review statuses
-            $statConditions = [];
-            $statParams = [];
-            if ($affiliatorId !== null) {
-                $statConditions[] = "affiliator_id = :affiliator_id";
-                $statParams['affiliator_id'] = $affiliatorId;
-            }
-            $statWhere = !empty($statConditions) ? "WHERE " . implode(" AND ", $statConditions) : "";
-
-            $statStmt = $pdo->prepare("
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(CASE WHEN status = 'Submitted' THEN 1 END) as submitted,
-                    COUNT(CASE WHEN status = 'Dalam Review' THEN 1 END) as review,
-                    COUNT(CASE WHEN status = 'Need Clarification' THEN 1 END) as clarification,
-                    COUNT(CASE WHEN status = 'Need Revision' THEN 1 END) as revision,
-                    COUNT(CASE WHEN status = 'Approved' THEN 1 END) as approved,
-                    COUNT(CASE WHEN status = 'Ditolak' THEN 1 END) as rejected
-                FROM adverse_events
-                $statWhere
-            ");
-            $statStmt->execute($statParams);
-            $stats = $statStmt->fetch(PDO::FETCH_ASSOC);
-
             // Base query with custom filters inside the subquery
             $query = "
                 SELECT * FROM (
@@ -129,16 +105,6 @@ class AdverseEventController
                 params: $params,
                 filterFields: ['event_type', 'patient_initial', 'registration_number', 'affiliator_name', 'report_number']
             );
-
-            $responseData['stats'] = [
-                'total'         => (int)($stats['total'] ?? 0),
-                'submitted'     => (int)($stats['submitted'] ?? 0),
-                'review'        => (int)($stats['review'] ?? 0),
-                'clarification' => (int)($stats['clarification'] ?? 0),
-                'revision'      => (int)($stats['revision'] ?? 0),
-                'approved'      => (int)($stats['approved'] ?? 0),
-                'rejected'      => (int)($stats['rejected'] ?? 0)
-            ];
 
             (new ApiResponse(true, 'Adverse events retrieved successfully', $responseData))->send(200);
 
