@@ -27,6 +27,7 @@ foreach ($iterator as $file) {
         if (in_array($ext, $allowedExtensions)) {
             $foundFiles[] = $file->getRealPath();
         }
+    }
 }
 $foundFiles = array_unique($foundFiles);
 

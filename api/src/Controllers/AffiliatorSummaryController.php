@@ -105,12 +105,11 @@ class AffiliatorSummaryController
                         is_revised,
                         is_approved,
                         affiliator_id,
-                        reference_id as reg_number,
+                        '' as reg_number,
                         NULL::integer as patient_id
                     FROM (
-                        SELECT ap.*, adm.reference_id
+                        SELECT ap.*
                         FROM affiliator_protocols ap
-                        LEFT JOIN admin_protocols adm ON ap.protocol_reference_id = adm.id
                     ) p
 
                     UNION ALL
