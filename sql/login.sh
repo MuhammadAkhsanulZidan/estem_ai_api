@@ -1,1 +1,1 @@
-psql -U rspad -d estem_ai_db
+psql -U rspad -d estemai_db
