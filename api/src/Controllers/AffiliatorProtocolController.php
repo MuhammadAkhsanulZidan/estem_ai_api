@@ -164,7 +164,19 @@ class AffiliatorProtocolController
                 $data = RequestHelper::getBody();
             }
 
+            $roleName = strtolower($user['data']['role_name'] ?? '');
+            $userId = $user['data']['id'] ?? null;
+
             $affiliatorId = $data['affiliator_id'] ?? null;
+            if ($roleName === 'affiliator' && $userId !== null) {
+                $stmtUser = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+                $stmtUser->execute(['id' => $userId]);
+                $dbAffiliatorId = $stmtUser->fetchColumn();
+                if ($dbAffiliatorId) {
+                    $affiliatorId = $dbAffiliatorId;
+                }
+            }
+
             $protocolName = trim($data['protocol_name'] ?? '');
             $statusId = trim($data['status_id'] ?? '');
 
@@ -210,9 +222,20 @@ class AffiliatorProtocolController
 
             // Process File Uploads dynamically
             if (!empty($_FILES)) {
-                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $newProtocol['id'] . '/';
+                $protocolsBaseDir = __DIR__ . '/../../public/bck/affiliator/protocols/';
+                if (!is_dir($protocolsBaseDir)) {
+                    if (!mkdir($protocolsBaseDir, 0777, true)) {
+                        throw new \Exception("Failed to create protocols base directory: " . $protocolsBaseDir);
+                    }
+                    @chmod($protocolsBaseDir, 0777);
+                }
+
+                $uploadDir = $protocolsBaseDir . $affiliatorCode . '/' . $newProtocol['id'] . '/';
                 if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0777, true);
+                    if (!mkdir($uploadDir, 0777, true)) {
+                        throw new \Exception("Failed to create target protocol directory: " . $uploadDir);
+                    }
+                    @chmod($uploadDir, 0777);
                 }
 
                 foreach ($_FILES as $key => $file) {
@@ -224,18 +247,20 @@ class AffiliatorProtocolController
                         $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
                         $targetPath = $uploadDir . $sanitizedName;
 
-                        if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                            $dbPath = 'public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $newProtocol['id'] . '/' . $sanitizedName;
-
-                            $insStmt = $pdo->prepare("
-                                INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
-                                VALUES (:protocol_id, :document_path)
-                            ");
-                            $insStmt->execute([
-                                'protocol_id' => $newProtocol['id'],
-                                'document_path' => $dbPath
-                            ]);
+                        if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+                            throw new \Exception("Failed to move uploaded file to target path: " . $targetPath);
                         }
+
+                        $dbPath = 'public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $newProtocol['id'] . '/' . $sanitizedName;
+
+                        $insStmt = $pdo->prepare("
+                            INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
+                            VALUES (:protocol_id, :document_path)
+                        ");
+                        $insStmt->execute([
+                            'protocol_id' => $newProtocol['id'],
+                            'document_path' => $dbPath
+                        ]);
                     }
                 }
             }
@@ -276,7 +301,18 @@ class AffiliatorProtocolController
                 (new ApiResponse(false, 'Protocol not found'))->send(404);
             }
 
+            $roleName = strtolower($user['data']['role_name'] ?? '');
+            $userId = $user['data']['id'] ?? null;
+
             $affiliatorId = $data['affiliator_id'] ?? $existing['affiliator_id'];
+            if ($roleName === 'affiliator' && $userId !== null) {
+                $stmtUser = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+                $stmtUser->execute(['id' => $userId]);
+                $dbAffiliatorId = $stmtUser->fetchColumn();
+                if ($dbAffiliatorId) {
+                    $affiliatorId = $dbAffiliatorId;
+                }
+            }
             $protocolName = isset($data['protocol_name']) ? trim($data['protocol_name']) : $existing['protocol_name'];
             $statusId = isset($data['status_id']) ? trim($data['status_id']) : StatusHelper::resolveStatus($existing);
 
@@ -358,9 +394,20 @@ class AffiliatorProtocolController
 
             // Process newly uploaded documents
             if (!empty($_FILES)) {
-                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $id . '/';
+                $protocolsBaseDir = __DIR__ . '/../../public/bck/affiliator/protocols/';
+                if (!is_dir($protocolsBaseDir)) {
+                    if (!mkdir($protocolsBaseDir, 0777, true)) {
+                        throw new \Exception("Failed to create protocols base directory: " . $protocolsBaseDir);
+                    }
+                    @chmod($protocolsBaseDir, 0777);
+                }
+
+                $uploadDir = $protocolsBaseDir . $affiliatorCode . '/' . $id . '/';
                 if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0777, true);
+                    if (!mkdir($uploadDir, 0777, true)) {
+                        throw new \Exception("Failed to create target protocol directory: " . $uploadDir);
+                    }
+                    @chmod($uploadDir, 0777);
                 }
 
                 $filesToProcess = [];
@@ -392,18 +439,20 @@ class AffiliatorProtocolController
                     $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $filename) . '_' . time() . '_' . $randomId . '.' . $extension;
                     $targetPath = $uploadDir . $sanitizedName;
 
-                    if (move_uploaded_file($f['tmp_name'], $targetPath)) {
-                        $dbPath = 'public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $id . '/' . $sanitizedName;
-
-                        $insStmt = $pdo->prepare("
-                            INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
-                            VALUES (:protocol_id, :document_path)
-                        ");
-                        $insStmt->execute([
-                            'protocol_id' => $id,
-                            'document_path' => $dbPath
-                        ]);
+                    if (!move_uploaded_file($f['tmp_name'], $targetPath)) {
+                        throw new \Exception("Failed to move uploaded file to target path: " . $targetPath);
                     }
+
+                    $dbPath = 'public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $id . '/' . $sanitizedName;
+
+                    $insStmt = $pdo->prepare("
+                        INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
+                        VALUES (:protocol_id, :document_path)
+                    ");
+                    $insStmt->execute([
+                        'protocol_id' => $id,
+                        'document_path' => $dbPath
+                    ]);
                 }
             }
 
