@@ -68,6 +68,7 @@ class UserController
 
             if ($isAffiliator == 1) {
                 $statusConditions[] = "u.affiliator_id IS NOT NULL AND u.role_id = " . ROLE_ID::AFFILIATOR;
+                $statusConditions[] = "a.is_approved = true";
             }
             if ($isReviewer == 1){
                 $statusConditions[] = "u.role_id = " . ROLE_ID::REVIEWER;
@@ -94,7 +95,7 @@ class UserController
             ";
 
             // Dynamic table expression for pagination counting
-            $tableName = "(SELECT u.id, u.username, u.email, u.is_approved, u.is_reviewed, u.role_id, u.level_id, u.affiliator_id, u.created_at FROM users u {$statusWhere}) A";
+            $tableName = "(SELECT u.id, u.username, u.email, u.is_approved, u.is_reviewed, u.role_id, u.level_id, u.affiliator_id, u.created_at FROM users u LEFT JOIN affiliators a ON u.affiliator_id = a.id {$statusWhere}) A";
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,
