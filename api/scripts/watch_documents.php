@@ -4,7 +4,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 use App\Config\Database;
 
-$uploadDir = '/var/www/html/estem_ai_api/api/public/bck';
+$uploadDir = '/var/www/html/estem_ai_api/api/public/bck/administrator/protocols';
 $pythonPath = __DIR__ . '/../nlp/venv/bin/python3';
 $parserScript = __DIR__ . '/../nlp/parse_document.py';
 
@@ -75,14 +75,16 @@ foreach ($foundFiles as $filePath) {
         
         foreach ($chunks as $chunk) {
             $embeddingStr = isset($chunk['embedding']) ? '{' . implode(',', $chunk['embedding']) . '}' : null;
+            $intent = $chunk['intent'] ?? 'general_search';
             Database::execute(
-                "INSERT INTO chatbot_document_chunks (document_id, page_number, chunk_index, content, search_vector, embedding) 
-                 VALUES (?, ?, ?, ?, to_tsvector('simple', ?), ?)",
+                "INSERT INTO chatbot_document_chunks (document_id, page_number, chunk_index, content, intent, search_vector, embedding) 
+                 VALUES (?, ?, ?, ?, ?, to_tsvector('simple', ?), ?)",
                 [
                     $docId,
                     $chunk['page_number'],
                     $chunk['chunk_index'],
                     $chunk['content'],
+                    $intent,
                     $chunk['stemmed'],
                     $embeddingStr
                 ]

@@ -6,6 +6,7 @@ use App\Config\Database;
 use App\Models\ApiResponse;
 use App\Middleware\AuthMiddleware;
 use App\Helpers\RequestHelper;
+use PDO;
 
 class ChatbotController
 {
@@ -53,17 +54,14 @@ class ChatbotController
 
             // 4. Route based on Intent
             switch ($intent) {
-                case 'cek_status_protokol':
-                    list($responseMessage, $responseData) = $this->handleStatusProtokol($userRole, $affiliatorId);
+                case 'definition':
+                    list($responseMessage, $responseData) = $this->handleGeneralSearch($queryText, 'definition');
                     break;
-                case 'cek_efek_samping':
-                    list($responseMessage, $responseData) = $this->handleEfekSamping($userRole, $affiliatorId);
+                case 'procedure':
+                    list($responseMessage, $responseData) = $this->handleGeneralSearch($queryText, 'procedure');
                     break;
-                case 'cek_reviewer':
-                    list($responseMessage, $responseData) = $this->handleReviewerAssign($userRole, $affiliatorId);
-                    break;
-                case 'cek_jumlah_pasien':
-                    list($responseMessage, $responseData) = $this->handleJumlahPasien($userRole, $affiliatorId);
+                case 'safety_monitoring':
+                    list($responseMessage, $responseData) = $this->handleGeneralSearch($queryText, 'safety_monitoring');
                     break;
                 case 'general_search':
                 default:
@@ -84,153 +82,76 @@ class ChatbotController
     }
 
     /**
-     * Handler: cek_status_protokol
+     * POST /v1/chat/feedback
+     * Collects user thumbs up feedback to grow training datasets.
      */
-    private function handleStatusProtokol(?string $role, ?int $affiliatorId): array
+    public function feedback()
     {
-        $sql = "
-            SELECT p.id, p.protocol_number, p.protocol_title, p.status, p.created_at, a.affiliator_name
-            FROM affiliator_protocols p
-            LEFT JOIN affiliators a ON p.affiliator_id = a.id
-        ";
-        
-        $params = [];
-        if ($role === 'Affiliator' && $affiliatorId !== null) {
-            $sql .= " WHERE p.affiliator_id = :affiliator_id";
-            $params[':affiliator_id'] = $affiliatorId;
-        }
-        
-        $sql .= " ORDER BY p.updated_at DESC LIMIT 5";
-        $protocols = Database::fetchAll($sql, $params);
-        
-        if (empty($protocols)) {
-            return ["Maaf, saya tidak menemukan data pengajuan protokol stem cell saat ini.", []];
-        }
+        try {
+            AuthMiddleware::authorize();
+            $pdo = Database::getConnection();
+            $input = json_decode(file_get_contents('php://input'), true);
 
-        $message = "Berikut adalah status pengajuan protokol stem cell terbaru:\n";
-        foreach ($protocols as $p) {
-            $num = $p['protocol_number'] ?? 'N/A';
-            $title = $p['protocol_title'];
-            $status = $p['status'] ?? 'Draft';
-            $hospital = $p['affiliator_name'] ?? 'N/A';
-            $message .= "- *[$num]* $title ($hospital) - Status: **$status**\n";
-        }
-        
-        return [$message, $protocols];
-    }
+            $query = trim($input['query'] ?? '');
+            $intent = trim($input['intent'] ?? '');
 
-    /**
-     * Handler: cek_efek_samping
-     */
-    private function handleEfekSamping(?string $role, ?int $affiliatorId): array
-    {
-        $sql = "
-            SELECT ae.id, ae.patient_name, ae.event_description, ae.onset_date, ae.severity, a.affiliator_name
-            FROM adverse_events ae
-            LEFT JOIN affiliators a ON ae.affiliator_id = a.id
-        ";
-        
-        $params = [];
-        if ($role === 'Affiliator' && $affiliatorId !== null) {
-            $sql .= " WHERE ae.affiliator_id = :affiliator_id";
-            $params[':affiliator_id'] = $affiliatorId;
-        }
-        
-        $sql .= " ORDER BY ae.created_at DESC LIMIT 5";
-        $events = Database::fetchAll($sql, $params);
-        
-        if (empty($events)) {
-            return ["Bagus! Tidak ada laporan efek samping (adverse events) terbaru yang tercatat.", []];
-        }
+            if (empty($query) || empty($intent)) {
+                (new ApiResponse(false, 'Query and Intent are required for feedback'))->send(400);
+                return;
+            }
 
-        $message = "Berikut adalah daftar laporan kejadian efek samping (adverse events) terbaru:\n";
-        foreach ($events as $e) {
-            $name = $e['patient_name'];
-            $desc = $e['event_description'];
-            $severity = $e['severity'] ?? 'N/A';
-            $hospital = $e['affiliator_name'] ?? 'N/A';
-            $message .= "- Pasien **$name** di $hospital mengalami: \"$desc\" (Tingkat Keparahan: **$severity**)\n";
-        }
-        
-        return [$message, $events];
-    }
+            // Verify if intent exists in chatbot_intents to avoid foreign key violation
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM chatbot_intents WHERE name = :name");
+            $stmt->execute(['name' => $intent]);
+            if ((int)$stmt->fetchColumn() === 0) {
+                (new ApiResponse(false, 'Invalid intent name'))->send(400);
+                return;
+            }
 
-    /**
-     * Handler: cek_reviewer
-     */
-    private function handleReviewerAssign(?string $role, ?int $affiliatorId): array
-    {
-        $sql = "
-            SELECT p.protocol_number, p.protocol_title, u.username as reviewer_name, a.affiliator_name
-            FROM affiliator_protocols p
-            JOIN users u ON p.reviewer_id = u.id
-            LEFT JOIN affiliators a ON p.affiliator_id = a.id
-        ";
-        
-        $params = [];
-        if ($role === 'Affiliator' && $affiliatorId !== null) {
-            $sql .= " WHERE p.affiliator_id = :affiliator_id";
-            $params[':affiliator_id'] = $affiliatorId;
-        }
-        
-        $sql .= " LIMIT 5";
-        $assignments = Database::fetchAll($sql, $params);
-        
-        if (empty($assignments)) {
-            return ["Belum ada penetapan reviewer untuk protokol aktif saat ini.", []];
-        }
+            // Insert phrase into chatbot_training_data
+            $insStmt = $pdo->prepare("
+                INSERT INTO chatbot_training_data (phrase, intent)
+                VALUES (:phrase, :intent)
+                ON CONFLICT (phrase) DO NOTHING
+            ");
+            $insStmt->execute([
+                'phrase' => strtolower($query),
+                'intent' => $intent
+            ]);
 
-        $message = "Berikut adalah daftar penetapan reviewer untuk protokol pengajuan:\n";
-        foreach ($assignments as $a) {
-            $num = $a['protocol_number'] ?? 'N/A';
-            $title = $a['protocol_title'];
-            $rev = $a['reviewer_name'];
-            $message .= "- Protokol **[$num] $title** ditinjau oleh reviewer: **$rev**\n";
-        }
-        
-        return [$message, $assignments];
-    }
+            (new ApiResponse(true, 'Feedback recorded successfully'))->send(200);
 
-    /**
-     * Handler: cek_jumlah_pasien
-     */
-    private function handleJumlahPasien(?string $role, ?int $affiliatorId): array
-    {
-        $sql = "SELECT COUNT(*) FROM patients";
-        $params = [];
-        
-        if ($role === 'Affiliator' && $affiliatorId !== null) {
-            $sql .= " WHERE affiliator_id = :affiliator_id";
-            $params[':affiliator_id'] = $affiliatorId;
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Feedback error: ' . $e->getMessage()))->send(500);
         }
-        
-        $count = Database::fetchColumn($sql, $params);
-        $message = "Total pasien stem cell yang terdaftar di sistem saat ini adalah **$count** pasien.";
-        return [$message, ['count' => $count]];
     }
 
     /**
      * Handler: general_search (Document Search via Sastrawi & PostgreSQL FTS)
      */
-    private function handleGeneralSearch(string $queryText): array
+    private function handleGeneralSearch(string $queryText, ?string $intent = null): array
     {
         $escapedQuery = escapeshellarg($queryText);
         $queryScript = $this->nlpDir . '/process_query.py';
-        $queryOutput = shell_exec("{$this->pythonPath} {$queryScript} --query {$escapedQuery}");
+        $cmd = "{$this->pythonPath} {$queryScript} --query {$escapedQuery}";
+        if ($intent !== null) {
+            $cmd .= " --intent " . escapeshellarg($intent);
+        }
+        $queryOutput = shell_exec($cmd);
         $queryResult = json_decode($queryOutput, true);
-        
+
         if (!isset($queryResult['success']) || !$queryResult['success']) {
             $errorMsg = $queryResult['error'] ?? 'Unknown script error';
             return ["Maaf, terjadi kesalahan saat melakukan pencarian dokumen: $errorMsg", []];
         }
-        
+
         $matches = $queryResult['matches'] ?? [];
-        
+
         // Filter matches below similarity threshold (0.3)
         $filteredMatches = array_filter($matches, function($match) {
             return ($match['score'] ?? 0.0) >= 0.3;
         });
-        
+
         if (empty($filteredMatches)) {
             return ["Saya tidak dapat menemukan informasi yang cukup relevan terkait \"" . htmlspecialchars($queryText) . "\" di dokumen panduan stem cell yang tersedia.", []];
         }
@@ -241,15 +162,15 @@ class ChatbotController
             $page = $match['page_number'];
             $excerpt = trim($match['content']);
             $score = round($match['score'] * 100, 1);
-            
+
             // Generate link to specific PDF page served via Nginx alias
             $pdfLink = "/assets/" . urlencode($docName) . "#page=" . $page;
-            
+
             $message .= "> ... " . $excerpt . " ...\n\n";
             $message .= "*(Sumber: [" . $docName . "](" . $pdfLink . "), Halaman " . $page . " - Kecocokan: " . $score . "% )*\n";
             $message .= "---\n\n";
         }
-        
+
         return [$message, $filteredMatches];
     }
 }

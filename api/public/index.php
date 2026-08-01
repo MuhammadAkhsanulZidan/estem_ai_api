@@ -135,6 +135,7 @@ try {
     $router->delete('/v1/admin_protocol_documents', [AdminProtocolDocumentController::class, 'delete']);
 
     $router->post('/v1/chat', [ChatbotController::class, 'chat']);
+    $router->post('/v1/chat/feedback', [ChatbotController::class, 'feedback']);
 
 // Parse path to remove query parameters
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);

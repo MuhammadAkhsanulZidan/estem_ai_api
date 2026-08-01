@@ -20,6 +20,7 @@ def load_env(env_path):
 def main():
     parser = argparse.ArgumentParser(description="Semantic search Indonesian query.")
     parser.add_argument("--query", required=True, help="User search query")
+    parser.add_argument("--intent", required=False, default=None, help="Optional intent classification to filter chunks")
     args = parser.parse_args()
 
     try:
@@ -44,12 +45,18 @@ def main():
         cursor = conn.cursor()
 
         # Fetch all document chunks and their embeddings
-        cursor.execute("""
+        query = """
             SELECT c.id, c.content, c.page_number, d.file_name, c.embedding
             FROM chatbot_document_chunks c
             JOIN chatbot_documents d ON c.document_id = d.id
             WHERE c.embedding IS NOT NULL
-        """)
+        """
+        params = []
+        if args.intent:
+            query += " AND c.intent = %s"
+            params.append(args.intent)
+            
+        cursor.execute(query, params)
         rows = cursor.fetchall()
 
         if not rows:

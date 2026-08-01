@@ -183,6 +183,9 @@ class AdminProtocolController
                             'protocol_id' => $newProtocol['id'],
                             'document_path' => $dbPath
                         ]);
+
+                        // Synchronous chatbot ingestion
+                        $this->ingestChatbotDocument($pdo, $targetPath, $sanitizedName);
                     }
                 }
             }
@@ -294,6 +297,9 @@ class AdminProtocolController
                             'protocol_id' => $id,
                             'document_path' => $dbPath
                         ]);
+
+                        // Synchronous chatbot ingestion
+                        $this->ingestChatbotDocument($pdo, $targetPath, $sanitizedName);
                     }
                 }
             }
@@ -323,6 +329,10 @@ class AdminProtocolController
                         $absPath = realpath($publicDir . $doc['document_path']);
                         if ($absPath && file_exists($absPath) && is_file($absPath)) {
                             unlink($absPath);
+
+                            // Clean up chatbot document and chunks
+                            $delChatbotDoc = $pdo->prepare("DELETE FROM chatbot_documents WHERE file_path = :file_path");
+                            $delChatbotDoc->execute(['file_path' => $absPath]);
                         }
                         
                         $delStmt = $pdo->prepare("DELETE FROM admin_protocol_documents WHERE id = :id");
@@ -373,6 +383,10 @@ class AdminProtocolController
                 $absPath = realpath($publicDir . $doc['document_path']);
                 if ($absPath && file_exists($absPath) && is_file($absPath)) {
                     unlink($absPath);
+
+                    // Clean up chatbot document and chunks
+                    $delChatbotDoc = $pdo->prepare("DELETE FROM chatbot_documents WHERE file_path = :file_path");
+                    $delChatbotDoc->execute(['file_path' => $absPath]);
                 }
             }
 
@@ -572,5 +586,22 @@ class AdminProtocolController
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
+    }
+
+    /**
+     * Parse document and insert chunks/embeddings/intents into chatbot tables in the background.
+     */
+    private function ingestChatbotDocument(\PDO $pdo, string $targetPath, string $sanitizedName)
+    {
+        $tempChatbotDir = __DIR__ . '/../../public/bck/chatbot_documents/';
+        if (!is_dir($tempChatbotDir)) {
+            mkdir($tempChatbotDir, 0777, true);
+        }
+        $tempPath = $tempChatbotDir . $sanitizedName;
+        copy($targetPath, $tempPath);
+        
+        $scriptPath = __DIR__ . '/../../scripts/ingest_single_document.php';
+        $cmd = "php " . escapeshellarg($scriptPath) . " " . escapeshellarg($tempPath) . " " . escapeshellarg($targetPath) . " " . escapeshellarg($sanitizedName) . " > /dev/null 2>&1 &";
+        shell_exec($cmd);
     }
 }
