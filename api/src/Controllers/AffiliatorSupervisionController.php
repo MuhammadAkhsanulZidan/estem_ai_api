@@ -218,12 +218,12 @@ class AffiliatorSupervisionController
             $isPosted = ($status === 'submitted') ? 'true' : 'false';
 
             // Check if record exists
-            $checkStmt = $pdo->prepare("SELECT reference_id, is_posted FROM affiliator_supervisions WHERE affiliator_id = :affiliator_id");
+            $checkStmt = $pdo->prepare("SELECT reference_id, is_posted, is_revised FROM affiliator_supervisions WHERE affiliator_id = :affiliator_id");
             $checkStmt->execute(['affiliator_id' => $affiliatorId]);
             $existing = $checkStmt->fetch();
 
             if ($existing) {
-                if ($existing['is_posted'] == true) {
+                if ($existing['is_posted'] && !$existing['is_revised']) {
                     (new ApiResponse(false, 'Pengajuan pengampuan telah dikirim dan tidak dapat diubah.'))->send(400);
                     return;
                 }
