@@ -203,9 +203,14 @@ class AffiliatorProtocolController
             $stmt->execute();
             $newProtocol = $stmt->fetch();
 
+            // Fetch affiliator code to determine subfolder pathing
+            $codeStmt = $pdo->prepare("SELECT affiliator_code FROM affiliators WHERE id = :id");
+            $codeStmt->execute(['id' => $affiliatorId]);
+            $affiliatorCode = $codeStmt->fetchColumn() ?: 'default';
+
             // Process File Uploads dynamically
             if (!empty($_FILES)) {
-                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/';
+                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $newProtocol['id'] . '/';
                 if (!is_dir($uploadDir)) {
                     mkdir($uploadDir, 0777, true);
                 }
@@ -220,7 +225,7 @@ class AffiliatorProtocolController
                         $targetPath = $uploadDir . $sanitizedName;
 
                         if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                            $dbPath = 'public/bck/affiliator/protocols/' . $sanitizedName;
+                            $dbPath = 'public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $newProtocol['id'] . '/' . $sanitizedName;
 
                             $insStmt = $pdo->prepare("
                                 INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
@@ -346,9 +351,14 @@ class AffiliatorProtocolController
                 }
             }
 
+            // Fetch affiliator code to determine subfolder pathing
+            $codeStmt = $pdo->prepare("SELECT affiliator_code FROM affiliators WHERE id = :id");
+            $codeStmt->execute(['id' => $affiliatorId]);
+            $affiliatorCode = $codeStmt->fetchColumn() ?: 'default';
+
             // Process newly uploaded documents
             if (!empty($_FILES)) {
-                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/';
+                $uploadDir = __DIR__ . '/../../public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $id . '/';
                 if (!is_dir($uploadDir)) {
                     mkdir($uploadDir, 0777, true);
                 }
@@ -383,7 +393,7 @@ class AffiliatorProtocolController
                     $targetPath = $uploadDir . $sanitizedName;
 
                     if (move_uploaded_file($f['tmp_name'], $targetPath)) {
-                        $dbPath = 'public/bck/affiliator/protocols/' . $sanitizedName;
+                        $dbPath = 'public/bck/affiliator/protocols/' . $affiliatorCode . '/' . $id . '/' . $sanitizedName;
 
                         $insStmt = $pdo->prepare("
                             INSERT INTO affiliator_protocol_documents (protocol_id, document_path)
