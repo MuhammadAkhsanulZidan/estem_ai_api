@@ -261,8 +261,13 @@ class AffiliatorSupervisionController
             $supervision = $stmt->fetch();
             $supervisionId = $supervision['id'];
 
+            // Fetch affiliator code to determine subfolder
+            $codeStmt = $pdo->prepare("SELECT affiliator_code FROM affiliators WHERE id = :id");
+            $codeStmt->execute(['id' => $affiliatorId]);
+            $affiliatorCode = $codeStmt->fetchColumn() ?: 'default';
+
             // 3. Process File Uploads - Accept multiple documents dynamically
-            $uploadDir = __DIR__ . '/../../public/bck/affiliator/supervisions/';
+            $uploadDir = __DIR__ . '/../../public/bck/affiliator/supervision/' . $affiliatorCode . '/';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0777, true);
             }
@@ -278,7 +283,7 @@ class AffiliatorSupervisionController
                         $targetPath = $uploadDir . $sanitizedName;
 
                         if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                            $dbPath = 'public/bck/affiliator/supervisions/' . $sanitizedName;
+                            $dbPath = 'public/bck/affiliator/supervision/' . $affiliatorCode . '/' . $sanitizedName;
 
                             // Insert document record
                             $insStmt = $pdo->prepare("
