@@ -223,7 +223,7 @@ class AffiliatorSupervisionController
             $existing = $checkStmt->fetch();
 
             if ($existing) {
-                if ($existing['is_posted']) {
+                if ($existing['is_posted'] == true) {
                     (new ApiResponse(false, 'Pengajuan pengampuan telah dikirim dan tidak dapat diubah.'))->send(400);
                     return;
                 }
