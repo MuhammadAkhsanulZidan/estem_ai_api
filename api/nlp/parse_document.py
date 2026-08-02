@@ -1,5 +1,10 @@
 import os
 import sys
+
+# Set HuggingFace Cache Directories to local project directory before importing
+os.environ['HF_HOME'] = os.path.join(os.path.dirname(__file__), '.cache')
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = os.path.join(os.path.dirname(__file__), '.cache')
+
 import argparse
 import json
 from pypdf import PdfReader
