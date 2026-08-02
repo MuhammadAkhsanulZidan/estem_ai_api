@@ -392,9 +392,9 @@ class AdverseEventController
                 SELECT 
                     COUNT(CASE WHEN is_finished = true THEN 1 END) as is_finished,
                     COUNT(CASE WHEN is_finished = false THEN 1 END) as is_not_finished,
-                    COUNT(CASE WHEN severity = '0' OR severity = 'Ringan' THEN 1 END) as severity_0,
-                    COUNT(CASE WHEN severity = '1' OR severity = 'Sedang' THEN 1 END) as severity_1,
-                    COUNT(CASE WHEN severity = '2' OR severity = 'Serius (SAE)' THEN 1 END) as severity_2
+                    COUNT(CASE WHEN severity = 0 THEN 1 END) as severity_0,
+                    COUNT(CASE WHEN severity = 1 THEN 1 END) as severity_1,
+                    COUNT(CASE WHEN severity = 2 THEN 1 END) as severity_2
                 FROM adverse_events
                 $whereClause
             ";
