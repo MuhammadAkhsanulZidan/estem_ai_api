@@ -155,9 +155,10 @@ class AdminSummaryController
             $sql = "
                 SELECT 
                     COUNT(*) as total_events,
-                    COUNT(CASE WHEN severity = '0' OR severity = 'Ringan' THEN 1 END) as severity_0,
-                    COUNT(CASE WHEN severity = '1' OR severity = 'Sedang' THEN 1 END) as severity_1,
-                    COUNT(CASE WHEN severity = '2' OR severity = 'Serius (SAE)' OR severity = 'Berat' THEN 1 END) as severity_2
+                    COUNT(CASE WHEN severity = 0 THEN 1 END) as severity_0,
+                    COUNT(CASE WHEN severity = 1 THEN 1 END) as severity_1,
+                    COUNT(CASE WHEN severity = 2 THEN 1 END) as severity_2,
+                    COUNT(CASE WHEN severity = 3 THEN 1 END) as severity_3
                 FROM adverse_events
                 {$whereClause}
             ";
@@ -174,7 +175,8 @@ class AdminSummaryController
                 'severity' => [
                     '0' => (int)($stats['severity_0'] ?? 0),
                     '1' => (int)($stats['severity_1'] ?? 0),
-                    '2' => (int)($stats['severity_2'] ?? 0)
+                    '2' => (int)($stats['severity_2'] ?? 0),
+                    '3' => (int)($stats['severity_3'] ?? 0)
                 ]
             ];
 
