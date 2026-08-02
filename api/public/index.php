@@ -122,6 +122,7 @@ try {
     $router->put('/v1/adverse-events', [AdverseEventController::class, 'put']);
     $router->delete('/v1/adverse-events', [AdverseEventController::class, 'delete']);
     $router->get('/v1/affiliator-summary', [AffiliatorSummaryController::class, 'statusPengajuan']);
+    $router->get('/v1/affiliator-summary/dashboard', [AffiliatorSummaryController::class, 'dashboard']);
     $router->post('/v1/adverse-events/review', [AdverseEventController::class, 'review']);
 
         $router->get('/v1/ecrf_sections', [EcrfSectionController::class, 'get']);

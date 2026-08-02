@@ -170,6 +170,26 @@ class AdminSummaryController
             $stmt->execute();
             $stats = $stmt->fetch(PDO::FETCH_ASSOC);
 
+            // Group adverse events by parent admin protocol
+            $distStmt = $pdo->prepare("
+                SELECT 
+                    ap.protocol_name,
+                    COUNT(ae.id) as ae_count
+                FROM admin_protocols ap
+                LEFT JOIN affiliator_protocols afp ON ap.id = afp.protocol_reference_id
+                LEFT JOIN adverse_events ae ON afp.id = ae.protocol_id
+                GROUP BY ap.id, ap.protocol_name
+                ORDER BY ae_count DESC
+                LIMIT 5
+            ");
+            $distStmt->execute();
+            $distribution = $distStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Cast counts to integer
+            foreach ($distribution as &$d) {
+                $d['ae_count'] = (int)$d['ae_count'];
+            }
+
             $responseData = [
                 'total_events' => (int)($stats['total_events'] ?? 0),
                 'severity' => [
@@ -177,7 +197,8 @@ class AdminSummaryController
                     '1' => (int)($stats['severity_1'] ?? 0),
                     '2' => (int)($stats['severity_2'] ?? 0),
                     '3' => (int)($stats['severity_3'] ?? 0)
-                ]
+                ],
+                'protocol_distribution' => $distribution
             ];
 
             (new ApiResponse(true, 'Adverse event stats retrieved successfully', $responseData))->send(200);

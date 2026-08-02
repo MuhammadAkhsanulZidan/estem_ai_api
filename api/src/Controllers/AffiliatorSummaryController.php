@@ -228,4 +228,116 @@ class AffiliatorSummaryController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
+    public function dashboard()
+    {
+        $user = AuthMiddleware::authorize(['affiliator']);
+
+        try {
+            $pdo = Database::getConnection();
+
+            // Resolve affiliator_id
+            $affiliatorId = $user['data']['affiliator_id'] ?? null;
+            if ($affiliatorId === null) {
+                $affiliatorId = $this->resolveAffiliatorId($user);
+            }
+
+            if (!$affiliatorId) {
+                (new ApiResponse(false, 'User has no associated affiliator faskes.'))->send(403);
+                return;
+            }
+
+            // 1. KPI Stats
+            // Total Patients
+            $patStmt = $pdo->prepare("SELECT COUNT(*) FROM patient_ecrfs WHERE affiliator_id = :affiliator_id");
+            $patStmt->execute(['affiliator_id' => $affiliatorId]);
+            $totalPatients = (int)$patStmt->fetchColumn();
+
+            // Total Protocols
+            $protStmt = $pdo->prepare("SELECT COUNT(*) FROM affiliator_protocols WHERE affiliator_id = :affiliator_id");
+            $protStmt->execute(['affiliator_id' => $affiliatorId]);
+            $totalProtocols = (int)$protStmt->fetchColumn();
+
+            // Total Adverse Events
+            $aeStmt = $pdo->prepare("SELECT COUNT(*) FROM adverse_events WHERE affiliator_id = :affiliator_id");
+            $aeStmt->execute(['affiliator_id' => $affiliatorId]);
+            $totalAdverse = (int)$aeStmt->fetchColumn();
+
+            // Supervision Status
+            $supStmt = $pdo->prepare("SELECT is_posted, is_reviewed, is_approved, is_revised FROM affiliator_supervisions WHERE affiliator_id = :affiliator_id");
+            $supStmt->execute(['affiliator_id' => $affiliatorId]);
+            $supervision = $supStmt->fetch(PDO::FETCH_ASSOC);
+
+            // 2. Patient Trend (last 6 months)
+            $trendStmt = $pdo->prepare("
+                SELECT 
+                    TO_CHAR(created_at, 'Mon YYYY') as month,
+                    COUNT(*) as count
+                FROM patient_ecrfs
+                WHERE affiliator_id = :affiliator_id AND created_at >= NOW() - INTERVAL '6 months'
+                GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
+                ORDER BY DATE_TRUNC('month', created_at) ASC
+            ");
+            $trendStmt->execute(['affiliator_id' => $affiliatorId]);
+            $patientTrends = $trendStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // 3. eCRF Compliance (Lengkap, Sedang Pengisian, Perlu Revisi)
+            $compStmt = $pdo->prepare("
+                SELECT
+                    COUNT(CASE WHEN r.is_approved = true AND r.is_reviewed = true AND r.is_posted = true THEN 1 END) as lengkap,
+                    COUNT(CASE WHEN r.is_posted = false OR (r.is_posted = true AND r.is_reviewed = false) THEN 1 END) as sedang_pengisian,
+                    COUNT(CASE WHEN r.is_revised = true THEN 1 END) as perlu_revisi
+                FROM patient_ecrfs pe
+                LEFT JOIN (
+                    SELECT
+                        patient_id,
+                        bool_and(is_approved) as is_approved,
+                        bool_and(is_reviewed) as is_reviewed,
+                        bool_and(is_posted) as is_posted,
+                        bool_or(is_revised) as is_revised
+                    FROM patient_ecrf_responses
+                    GROUP BY patient_id
+                ) r ON pe.id = r.patient_id
+                WHERE pe.affiliator_id = :affiliator_id
+            ");
+            $compStmt->execute(['affiliator_id' => $affiliatorId]);
+            $compliance = $compStmt->fetch(PDO::FETCH_ASSOC);
+
+            // 4. Adverse Event by Protocol
+            $aeProtStmt = $pdo->prepare("
+                SELECT 
+                    ap.protocol_name,
+                    COUNT(ae.id) as count
+                FROM affiliator_protocols ap
+                JOIN adverse_events ae ON ap.id = ae.protocol_id
+                WHERE ap.affiliator_id = :affiliator_id
+                GROUP BY ap.id, ap.protocol_name
+                ORDER BY count DESC
+                LIMIT 5
+            ");
+            $aeProtStmt->execute(['affiliator_id' => $affiliatorId]);
+            $aeByProtocol = $aeProtStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $responseData = [
+                'kpi' => [
+                    'total_patients' => $totalPatients,
+                    'total_protocols' => $totalProtocols,
+                    'total_adverse_events' => $totalAdverse,
+                    'supervision' => $supervision ?: null
+                ],
+                'patient_trends' => $patientTrends,
+                'ecrf_compliance' => [
+                    'lengkap' => (int)($compliance['lengkap'] ?? 0),
+                    'sedang_pengisian' => (int)($compliance['sedang_pengisian'] ?? 0),
+                    'perlu_revisi' => (int)($compliance['perlu_revisi'] ?? 0)
+                ],
+                'adverse_event_by_protocol' => $aeByProtocol
+            ];
+
+            (new ApiResponse(true, 'Affiliator dashboard stats retrieved successfully', $responseData))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }
