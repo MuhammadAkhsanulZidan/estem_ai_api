@@ -351,7 +351,7 @@ class AdverseEventController
      */
     public function stats()
     {
-        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+        $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
 
         try {
             $pdo = Database::getConnection();
