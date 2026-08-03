@@ -434,4 +434,47 @@ class AdverseEventController
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
+
+    public function review()
+    {
+        AuthMiddleware::authorize(['reviewer', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $data['id'] ?? null;
+            $reviewerNote = isset($data['reviewer_note']) ? trim($data['reviewer_note']) : null;
+
+            if ($id === null) {
+                (new ApiResponse(false, 'Adverse event ID is required.'))->send(400);
+                return;
+            }
+
+            $stmt = $pdo->prepare("
+                UPDATE adverse_events
+                SET reviewer_note = :reviewer_note,
+                    updated_at = NOW()
+                WHERE id = :id
+                RETURNING *
+            ");
+
+            $stmt->execute([
+                'reviewer_note' => $reviewerNote === '' ? null : $reviewerNote,
+                'id'            => $id
+            ]);
+
+            $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$updated) {
+                (new ApiResponse(false, 'Adverse event record not found.'))->send(404);
+                return;
+            }
+
+            (new ApiResponse(true, 'Catatan reviewer berhasil disimpan', $updated))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
 }
