@@ -101,7 +101,7 @@ class AdverseEventController
 
             // Dynamic table expression for pagination counting
             $tableName = "(
-                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number 
+                SELECT ae.*, p.patient_initial, p.registration_number, aff.affiliator_name, ae.report_number
                 FROM adverse_events ae
                 LEFT JOIN patient_ecrfs p ON ae.patient_id = p.id
                 LEFT JOIN affiliators aff ON ae.affiliator_id = aff.id
@@ -150,6 +150,8 @@ class AdverseEventController
             $actionTaken = trim($data['action_taken'] ?? '');
             $reporterName = trim($data['reporter_name'] ?? '');
             $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
+            $affiliatorNote = trim($data['affiliator_note'] ?? '');
+            $reviewerNote = trim($data['reviewer_note'] ?? '');
 
             if ($patientId === null || $protocolId === null || $eventType === '' || $severity === '') {
                 (new ApiResponse(false, 'patient_id, protocol_id, event_type, and severity are required'))->send(400);
@@ -167,11 +169,11 @@ class AdverseEventController
                 INSERT INTO adverse_events (
                     affiliator_id, report_number, patient_id, protocol_id,
                     event_type, severity, action_taken, reporter_name,
-                    is_finished, created_by, updated_by
+                    is_finished, created_by, updated_by, affiliator_note, reviewer_note
                 ) VALUES (
                     :affiliator_id, :report_number, :patient_id, :protocol_id,
                     :event_type, :severity, :action_taken, :reporter_name,
-                    :is_finished, :user_id, :user_id
+                    :is_finished, :user_id, :user_id, :affiliator_note, :reviewer_note
                 ) RETURNING *
             ");
 
@@ -185,7 +187,9 @@ class AdverseEventController
                 'action_taken'  => $actionTaken === '' ? null : $actionTaken,
                 'reporter_name' => $reporterName === '' ? null : $reporterName,
                 'is_finished'   => $isFinished ? 'true' : 'false',
-                'user_id'       => $userId
+                'user_id'       => $userId,
+                'affiliator_note' => $affiliatorNote === '' ? null : $affiliatorNote,
+                'reviewer_note'   => $reviewerNote === '' ? null : $reviewerNote
             ]);
 
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -245,6 +249,8 @@ class AdverseEventController
             $actionTaken = isset($data['action_taken']) ? trim($data['action_taken']) : null;
             $reporterName = isset($data['reporter_name']) ? trim($data['reporter_name']) : null;
             $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
+            $affiliatorNote = isset($data['affiliator_note']) ? trim($data['affiliator_note']) : null;
+            $reviewerNote = isset($data['reviewer_note']) ? trim($data['reviewer_note']) : null;
 
             if ($patientId === null || $protocolId === null || $eventType === '' || $severity === '') {
                 (new ApiResponse(false, 'patient_id, protocol_id, event_type, and severity are required.'))->send(400);
@@ -260,6 +266,8 @@ class AdverseEventController
                     action_taken = :action_taken,
                     reporter_name = :reporter_name,
                     is_finished = :is_finished,
+                    affiliator_note = :affiliator_note,
+                    reviewer_note = :reviewer_note,
                     updated_at = NOW(),
                     updated_by = :user_id
                 WHERE id = :id
@@ -274,6 +282,8 @@ class AdverseEventController
                 'action_taken'  => $actionTaken === '' ? null : $actionTaken,
                 'reporter_name' => $reporterName === '' ? null : $reporterName,
                 'is_finished'   => $isFinished ? 'true' : 'false',
+                'affiliator_note' => $affiliatorNote === '' ? null : $affiliatorNote,
+                'reviewer_note'   => $reviewerNote === '' ? null : $reviewerNote,
                 'user_id'       => $userId,
                 'id'            => $id
             ]);
@@ -389,7 +399,7 @@ class AdverseEventController
             }
 
             $sql = "
-                SELECT 
+                SELECT
                     COUNT(CASE WHEN is_finished = true THEN 1 END) as is_finished,
                     COUNT(CASE WHEN is_finished = false THEN 1 END) as is_not_finished,
                     COUNT(CASE WHEN severity = 0 THEN 1 END) as severity_0,

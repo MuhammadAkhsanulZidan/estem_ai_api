@@ -12,6 +12,8 @@ CREATE TABLE adverse_events (
     action_taken TEXT,
     reporter_name VARCHAR(150),
     report_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    affiliator_note VARCHAR(100),
+    reviewer_note VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_by INT REFERENCES users(id),
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
