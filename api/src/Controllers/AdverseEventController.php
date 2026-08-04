@@ -150,7 +150,6 @@ class AdverseEventController
             $actionTaken = trim($data['action_taken'] ?? '');
             $reporterName = trim($data['reporter_name'] ?? '');
             $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
-            $affiliatorNote = trim($data['affiliator_note'] ?? '');
             $reviewerNote = trim($data['reviewer_note'] ?? '');
 
             if ($patientId === null || $protocolId === null || $eventType === '' || $severity === '') {
@@ -169,11 +168,11 @@ class AdverseEventController
                 INSERT INTO adverse_events (
                     affiliator_id, report_number, patient_id, protocol_id,
                     event_type, severity, action_taken, reporter_name,
-                    is_finished, created_by, updated_by, affiliator_note, reviewer_note
+                    is_finished, created_by, updated_by, reviewer_note
                 ) VALUES (
                     :affiliator_id, :report_number, :patient_id, :protocol_id,
                     :event_type, :severity, :action_taken, :reporter_name,
-                    :is_finished, :user_id, :user_id, :affiliator_note, :reviewer_note
+                    :is_finished, :user_id, :user_id, :reviewer_note
                 ) RETURNING *
             ");
 
@@ -188,7 +187,6 @@ class AdverseEventController
                 'reporter_name' => $reporterName === '' ? null : $reporterName,
                 'is_finished'   => $isFinished ? 'true' : 'false',
                 'user_id'       => $userId,
-                'affiliator_note' => $affiliatorNote === '' ? null : $affiliatorNote,
                 'reviewer_note'   => $reviewerNote === '' ? null : $reviewerNote
             ]);
 
@@ -249,7 +247,6 @@ class AdverseEventController
             $actionTaken = isset($data['action_taken']) ? trim($data['action_taken']) : null;
             $reporterName = isset($data['reporter_name']) ? trim($data['reporter_name']) : null;
             $isFinished = isset($data['is_finished']) ? ($data['is_finished'] === '1' || $data['is_finished'] === 1 || $data['is_finished'] === 'true' || $data['is_finished'] === true) : false;
-            $affiliatorNote = isset($data['affiliator_note']) ? trim($data['affiliator_note']) : null;
             $reviewerNote = isset($data['reviewer_note']) ? trim($data['reviewer_note']) : null;
 
             if ($patientId === null || $protocolId === null || $eventType === '' || $severity === '') {
@@ -266,7 +263,6 @@ class AdverseEventController
                     action_taken = :action_taken,
                     reporter_name = :reporter_name,
                     is_finished = :is_finished,
-                    affiliator_note = :affiliator_note,
                     reviewer_note = :reviewer_note,
                     updated_at = NOW(),
                     updated_by = :user_id
@@ -282,7 +278,6 @@ class AdverseEventController
                 'action_taken'  => $actionTaken === '' ? null : $actionTaken,
                 'reporter_name' => $reporterName === '' ? null : $reporterName,
                 'is_finished'   => $isFinished ? 'true' : 'false',
-                'affiliator_note' => $affiliatorNote === '' ? null : $affiliatorNote,
                 'reviewer_note'   => $reviewerNote === '' ? null : $reviewerNote,
                 'user_id'       => $userId,
                 'id'            => $id

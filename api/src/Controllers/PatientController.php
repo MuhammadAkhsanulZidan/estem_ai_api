@@ -48,14 +48,16 @@ class PatientController
                         pe.*,
                         aff.protocol_name,
                         aff.protocol_version,
-                        aff.indication AS protocol_indication
+                        aff.indication AS protocol_indication,
+                        h.affiliator_name
                     FROM patient_ecrfs pe
                     LEFT JOIN affiliator_protocols aff ON pe.protocol_id = aff.id
+                    LEFT JOIN affiliators h ON pe.affiliator_id = h.id
                     ORDER BY pe.id DESC
                 ) A
             ";
 
-            $tableName = "(SELECT pe.*, aff.protocol_name FROM patient_ecrfs pe LEFT JOIN affiliator_protocols aff ON pe.protocol_id = aff.id) A";
+            $tableName = "(SELECT pe.*, aff.protocol_name, h.affiliator_name FROM patient_ecrfs pe LEFT JOIN affiliator_protocols aff ON pe.protocol_id = aff.id LEFT JOIN affiliators h ON pe.affiliator_id = h.id) A";
             $queryWhere = "";
             $params = [];
 
@@ -69,7 +71,7 @@ class PatientController
                 query: $query,
                 tableName: $tableName,
                 queryWhere: $queryWhere,
-                filterFields: ['patient_initial', 'pic_doctor', 'registration_number', 'protocol_name'],
+                filterFields: ['patient_initial', 'pic_doctor', 'registration_number', 'protocol_name', 'affiliator_name'],
                 params: $params
             );
 
