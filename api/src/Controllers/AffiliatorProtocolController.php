@@ -109,6 +109,8 @@ class AffiliatorProtocolController
                 SELECT * FROM (
                     SELECT
                         ap.*, aff.affiliator_name,
+                        r.username as reviewer_username,
+                        r.full_name as reviewer_full_name,
                         COALESCE(
                             (
                                 SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
@@ -118,13 +120,14 @@ class AffiliatorProtocolController
                         ) AS documents
                     FROM affiliator_protocols ap
                     LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
+                    LEFT JOIN users r ON ap.reviewer_id = r.id
                     {$statusWhere}
                     ORDER BY ap.id DESC
                 ) A
             ";
 
             // Dynamic table expression for pagination counting
-            $tableName = "(SELECT ap.*, aff.affiliator_name FROM affiliator_protocols ap LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id {$statusWhere}) A";
+            $tableName = "(SELECT ap.*, aff.affiliator_name, r.username as reviewer_username, r.full_name as reviewer_full_name FROM affiliator_protocols ap LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id LEFT JOIN users r ON ap.reviewer_id = r.id {$statusWhere}) A";
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,
@@ -186,7 +189,6 @@ class AffiliatorProtocolController
 
             $indication = $data['indication'] ?? null;
             $protocolVersion = $data['protocol_version'] ?? null;
-            $protocolReferenceId = isset($data['protocol_reference_id']) && $data['protocol_reference_id'] !== "" ? (int)$data['protocol_reference_id'] : null;
             $creatorNote = $data['creator_note'] ?? null;
             $reviewerNote = $data['reviewer_note'] ?? null;
             $createdBy = $user['data']['id'] ?? null;
@@ -194,13 +196,12 @@ class AffiliatorProtocolController
             $flags = StatusHelper::mapStatusToFlags($statusId);
 
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_protocols (affiliator_id, protocol_reference_id, protocol_name, indication, protocol_version, is_posted, is_reviewed, is_revised, is_approved, creator_note, reviewer_note, create_by, created_at, updated_at)
-                VALUES (:affiliator_id, :protocol_reference_id, :protocol_name, :indication, :protocol_version, :is_posted, :is_reviewed, :is_revised, :is_approved, :creator_note, :reviewer_note, :create_by, NOW(), NOW())
+                INSERT INTO affiliator_protocols (affiliator_id, protocol_name, indication, protocol_version, is_posted, is_reviewed, is_revised, is_approved, creator_note, reviewer_note, create_by, created_at, updated_at)
+                VALUES (:affiliator_id, :protocol_name, :indication, :protocol_version, :is_posted, :is_reviewed, :is_revised, :is_approved, :creator_note, :reviewer_note, :create_by, NOW(), NOW())
                 RETURNING *
             ");
 
             $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
-            $stmt->bindValue(':protocol_reference_id', $protocolReferenceId, $protocolReferenceId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':protocol_name', $protocolName, PDO::PARAM_STR);
             $stmt->bindValue(':indication', $indication, $indication === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':protocol_version', $protocolVersion, $protocolVersion === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
@@ -322,7 +323,6 @@ class AffiliatorProtocolController
 
             $indication = isset($data['indication']) ? $data['indication'] : $existing['indication'];
             $protocolVersion = isset($data['protocol_version']) ? $data['protocol_version'] : $existing['protocol_version'];
-            $protocolReferenceId = isset($data['protocol_reference_id']) && $data['protocol_reference_id'] !== "" ? (int)$data['protocol_reference_id'] : $existing['protocol_reference_id'];
             $creatorNote = isset($data['creator_note']) ? $data['creator_note'] : $existing['creator_note'];
             $reviewerNote = isset($data['reviewer_note']) ? $data['reviewer_note'] : $existing['reviewer_note'];
             $updatedBy = $user['data']['id'] ?? null;
@@ -332,7 +332,6 @@ class AffiliatorProtocolController
             $stmt = $pdo->prepare("
                 UPDATE affiliator_protocols
                 SET affiliator_id = :affiliator_id,
-                    protocol_reference_id = :protocol_reference_id,
                     protocol_name = :protocol_name,
                     indication = :indication,
                     protocol_version = :protocol_version,
@@ -349,7 +348,6 @@ class AffiliatorProtocolController
             ");
 
             $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
-            $stmt->bindValue(':protocol_reference_id', $protocolReferenceId, $protocolReferenceId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':protocol_name', $protocolName, PDO::PARAM_STR);
             $stmt->bindValue(':indication', $indication, $indication === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':protocol_version', $protocolVersion, $protocolVersion === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
@@ -510,7 +508,7 @@ class AffiliatorProtocolController
 
     public function getReviewList(): void
     {
-        AuthMiddleware::authorize(['reviewer', 'admin']);
+        $user = AuthMiddleware::authorize(['reviewer', 'admin']);
         try {
             $pdo = Database::getConnection();
 
@@ -522,6 +520,12 @@ class AffiliatorProtocolController
 
             $whereParts = ["ap.is_posted = true"];
             $params = [];
+
+            $roleName = $user['data']['role_name'] ?? '';
+            if ($roleName === 'reviewer') {
+                $whereParts[] = "ap.reviewer_id = :reviewer_id";
+                $params['reviewer_id'] = (int)$user['data']['id'];
+            }
 
             if (!empty($filterValue)) {
                 $whereParts[] = "(ap.protocol_name ILIKE :filter OR ap.indication ILIKE :filter OR a.affiliator_name ILIKE :filter)";
@@ -555,9 +559,12 @@ class AffiliatorProtocolController
             $sql = "
                 SELECT
                     ap.*,
-                    a.affiliator_name as hospital_name
+                    a.affiliator_name as hospital_name,
+                    r.username as reviewer_username,
+                    r.full_name as reviewer_full_name
                 FROM affiliator_protocols ap
                 JOIN affiliators a ON ap.affiliator_id = a.id
+                LEFT JOIN users r ON ap.reviewer_id = r.id
                 WHERE $whereSql
                 ORDER BY ap.created_at DESC
                 LIMIT :limit OFFSET :offset
@@ -672,6 +679,269 @@ class AffiliatorProtocolController
 
             (new ApiResponse(true, 'Review decision saved', $updatedRow))->send(200);
 
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Retrieve E-CRF templates for an affiliator protocol.
+     */
+    public function getEcrf()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $protocolId = $_GET['protocol_id'] ?? null;
+
+            if ($protocolId === null) {
+                (new ApiResponse(false, 'Protocol ID is required'))->send(400);
+            }
+
+            // Optional: get a specific section
+            $sectionId = $_GET['section_id'] ?? null;
+
+            if ($sectionId !== null) {
+                $gStmt = $pdo->prepare("SELECT questions_schema FROM global_ecrf_templates WHERE section_id = :section_id");
+                $gStmt->execute(['section_id' => (int)$sectionId]);
+                $gRow = $gStmt->fetch();
+                $globalQuestions = $gRow ? json_decode($gRow['questions_schema'] ?? '[]', true) : [];
+
+                $stmt = $pdo->prepare("SELECT * FROM affiliator_protocol_ecrfs WHERE protocol_id = :protocol_id AND section_id = :section_id");
+                $stmt->execute([
+                    'protocol_id' => $protocolId,
+                    'section_id' => (int)$sectionId
+                ]);
+                $ecrf = $stmt->fetch();
+                $customQuestions = $ecrf ? json_decode($ecrf['questions_schema'], true) : [];
+                $data = array_merge($globalQuestions, $customQuestions);
+                (new ApiResponse(true, 'E-CRF retrieved successfully', $data))->send(200);
+            } else {
+                $globalStmt = $pdo->prepare("SELECT section_id, questions_schema FROM global_ecrf_templates");
+                $globalStmt->execute();
+                $globals = $globalStmt->fetchAll(PDO::FETCH_ASSOC);
+                $globalSchemaMap = [];
+                foreach ($globals as $g) {
+                    $globalSchemaMap[(int)$g['section_id']] = json_decode($g['questions_schema'] ?? '[]', true) ?: [];
+                }
+
+                // Return all sections grouped using LEFT JOIN with ecrf_sections lookup table
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        es.id AS section_id,
+                        es.section_name,
+                        ape.questions_schema
+                    FROM ecrf_sections es
+                    LEFT JOIN affiliator_protocol_ecrfs ape 
+                        ON es.id = ape.section_id AND ape.protocol_id = :protocol_id
+                    ORDER BY es.id ASC
+                ");
+                $stmt->execute(['protocol_id' => $protocolId]);
+                $rows = $stmt->fetchAll();
+
+                $rawSections = [
+                    'persiapan' => [],
+                    'pelaksanaan' => [],
+                    'monitoring' => [],
+                    'evaluasi' => [],
+                ];
+
+                $sectionMap = [
+                    1 => 'persiapan',
+                    2 => 'pelaksanaan',
+                    3 => 'monitoring',
+                    4 => 'evaluasi'
+                ];
+
+                foreach ($rows as $row) {
+                    $secId = (int)$row['section_id'];
+                    $secKey = $sectionMap[$secId] ?? ('section_' . $secId);
+                    $customQuestions = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
+                    $globalQuestions = $globalSchemaMap[$secId] ?? [];
+                    $rawSections[$secKey] = array_merge($globalQuestions, $customQuestions);
+                }
+
+                $persiapanCount = count($rawSections['persiapan']);
+                $pelaksanaanCount = count($rawSections['pelaksanaan']);
+                $monitoringCount = count($rawSections['monitoring']);
+
+                $isPelaksanaanLocked = ($persiapanCount === 0);
+                $isMonitoringLocked = $isPelaksanaanLocked || ($pelaksanaanCount === 0);
+                $isEvaluasiLocked = $isMonitoringLocked || ($monitoringCount === 0);
+
+                $sections = [
+                    'persiapan' => [
+                        'questions' => $rawSections['persiapan'],
+                        'is_locked' => false
+                    ],
+                    'pelaksanaan' => [
+                        'questions' => $rawSections['pelaksanaan'],
+                        'is_locked' => $isPelaksanaanLocked
+                    ],
+                    'monitoring' => [
+                        'questions' => $rawSections['monitoring'],
+                        'is_locked' => $isMonitoringLocked
+                    ],
+                    'evaluasi' => [
+                        'questions' => $rawSections['evaluasi'],
+                        'is_locked' => $isEvaluasiLocked
+                    ]
+                ];
+
+                (new ApiResponse(true, 'E-CRF templates retrieved successfully', $sections))->send(200);
+            }
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Save/Update E-CRF template for an affiliator protocol and section.
+     */
+    public function postEcrf()
+    {
+        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+
+        try {
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $protocolId = $data['protocol_id'] ?? null;
+            $sectionId = $data['section_id'] ?? null;
+            $questionsSchema = $data['questions_schema'] ?? [];
+
+            if ($protocolId === null || $sectionId === null) {
+                (new ApiResponse(false, 'Protocol ID and Section ID are required'))->send(400);
+            }
+
+            if (!in_array((int)$sectionId, [1, 2, 3, 4])) {
+                (new ApiResponse(false, 'Invalid Section ID. Must be 1, 2, 3, or 4'))->send(400);
+            }
+
+            // Backend UUID assignment & global questions filtering
+            $activeUuids = [];
+            $filteredQuestions = [];
+            if (is_array($questionsSchema)) {
+                foreach ($questionsSchema as $q) {
+                    if (!empty($q['is_global'])) {
+                        continue; // Exclude global questions from protocol schema
+                    }
+                    $qId = $q['id'] ?? null;
+                    if (!is_string($qId) || strlen($qId) !== 36 || substr_count($qId, '-') !== 4) {
+                        $q['id'] = sprintf(
+                            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+                            mt_rand(0, 0xffff),
+                            mt_rand(0, 0x0fff) | 0x4000,
+                            mt_rand(0, 0x3fff) | 0x8000,
+                            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+                        );
+                    }
+                    $activeUuids[] = $q['id'];
+                    $filteredQuestions[] = $q;
+                }
+            }
+
+            $jsonSchema = json_encode($filteredQuestions);
+            $userId = $user['data']['id'];
+
+            // PostgreSQL UPSERT (INSERT ... ON CONFLICT DO UPDATE)
+            $stmt = $pdo->prepare("
+                INSERT INTO affiliator_protocol_ecrfs (protocol_id, section_id, questions_schema, created_by, updated_by, created_at, updated_at)
+                VALUES (:protocol_id, :section_id, :questions_schema::jsonb, :user_id, :user_id, NOW(), NOW())
+                ON CONFLICT (protocol_id, section_id) 
+                DO UPDATE SET 
+                    questions_schema = EXCLUDED.questions_schema,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
+                RETURNING *
+            ");
+
+            $stmt->bindValue(':protocol_id', $protocolId, PDO::PARAM_INT);
+            $stmt->bindValue(':section_id', $sectionId, PDO::PARAM_INT);
+            $stmt->bindValue(':questions_schema', $jsonSchema, PDO::PARAM_STR);
+            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+
+            $stmt->execute();
+            $result = $stmt->fetch();
+
+            // Clean up patient answers for deleted/changed questions
+            if (!empty($activeUuids)) {
+                $resStmt = $pdo->prepare("SELECT id, answers_data FROM patient_ecrf_responses WHERE protocol_id = :protocol_id AND section_id = :section_id");
+                $resStmt->execute(['protocol_id' => $protocolId, 'section_id' => $sectionId]);
+                $responses = $resStmt->fetchAll();
+
+                foreach ($responses as $res) {
+                    $answers = json_decode($res['answers_data'] ?? '{}', true) ?: [];
+                    $cleaned = [];
+                    foreach ($answers as $qId => $val) {
+                        if (in_array($qId, $activeUuids)) {
+                            $cleaned[$qId] = $val;
+                        }
+                    }
+                    
+                    $updStmt = $pdo->prepare("UPDATE patient_ecrf_responses SET answers_data = :answers_data::jsonb, updated_at = NOW() WHERE id = :id");
+                    $updStmt->execute([
+                        'answers_data' => json_encode($cleaned),
+                        'id' => $res['id']
+                    ]);
+                }
+            }
+
+            (new ApiResponse(true, 'E-CRF saved successfully', $result))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Assign a reviewer to a protocol.
+     */
+    public function assignReviewer(): void
+    {
+        AuthMiddleware::authorize(['admin']);
+        try {
+            $data = RequestHelper::getBody();
+
+            if (empty($data['id'])) {
+                (new ApiResponse(false, 'Missing required field: id'))->send(400);
+                return;
+            }
+
+            $id = (int)$data['id'];
+            $reviewerId = isset($data['reviewer_id']) && $data['reviewer_id'] !== '' && $data['reviewer_id'] !== null ? (int)$data['reviewer_id'] : null;
+
+            $pdo = Database::getConnection();
+
+            // Verify protocol exists
+            $stmt = $pdo->prepare("SELECT id FROM affiliator_protocols WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            if (!$stmt->fetch()) {
+                (new ApiResponse(false, 'Protocol not found'))->send(404);
+                return;
+            }
+
+            // Verify reviewer user exists and has reviewer role (role_id = 2) if not null
+            if ($reviewerId !== null) {
+                $stmtUser = $pdo->prepare("SELECT id FROM users WHERE id = :id AND role_id = 2");
+                $stmtUser->execute(['id' => $reviewerId]);
+                if (!$stmtUser->fetch()) {
+                    (new ApiResponse(false, 'Invalid reviewer ID'))->send(400);
+                    return;
+                }
+            }
+
+            // Update protocol reviewer_id
+            $updateStmt = $pdo->prepare("
+                UPDATE affiliator_protocols
+                SET reviewer_id = :reviewer_id,
+                    updated_at = NOW()
+                WHERE id = :id
+            ");
+            $updateStmt->bindValue(':reviewer_id', $reviewerId, $reviewerId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+            $updateStmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $updateStmt->execute();
+
+            (new ApiResponse(true, 'Reviewer assigned successfully'))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }

@@ -173,12 +173,12 @@ class AdminSummaryController
             // Group adverse events by parent admin protocol
             $distStmt = $pdo->prepare("
                 SELECT 
-                    ap.protocol_name,
+                    afp.protocol_name,
                     COUNT(ae.id) as ae_count
-                FROM admin_protocols ap
-                LEFT JOIN affiliator_protocols afp ON ap.id = afp.protocol_reference_id
-                LEFT JOIN adverse_events ae ON afp.id = ae.protocol_id
-                GROUP BY ap.id, ap.protocol_name
+                FROM affiliator_protocols afp
+                LEFT JOIN patient_ecrfs pe ON afp.id = pe.protocol_id
+                LEFT JOIN adverse_events ae ON pe.id = ae.patient_id
+                GROUP BY afp.id, afp.protocol_name
                 ORDER BY ae_count DESC
                 LIMIT 5
             ");
@@ -255,28 +255,27 @@ class AdminSummaryController
                     ap.protocol_name,
                     COALESCE(p.patient_count, 0) as total_patients,
                     COALESCE(ae.ae_count, 0) as total_adverse_events
-                FROM admin_protocols ap
+                FROM affiliator_protocols ap
                 LEFT JOIN (
                     SELECT 
-                        ap_sub.protocol_reference_id,
+                        pe.protocol_id,
                         COUNT(pe.id) as patient_count
-                    FROM affiliator_protocols ap_sub
-                    JOIN patient_ecrfs pe ON ap_sub.id = pe.protocol_id
+                    FROM patient_ecrfs pe
                     WHERE 1=1 {$peFilter}
-                    GROUP BY ap_sub.protocol_reference_id
-                ) p ON ap.id = p.protocol_reference_id
+                    GROUP BY pe.protocol_id
+                ) p ON ap.id = p.protocol_id
                 LEFT JOIN (
                     SELECT 
-                        ap_sub2.protocol_reference_id,
+                        pe_sub.protocol_id,
                         COUNT(ae_sub.id) as ae_count
-                    FROM affiliator_protocols ap_sub2
-                    JOIN adverse_events ae_sub ON ap_sub2.id = ae_sub.protocol_id
+                    FROM patient_ecrfs pe_sub
+                    JOIN adverse_events ae_sub ON pe_sub.id = ae_sub.patient_id
                     WHERE 1=1 {$aeFilter}
-                    GROUP BY ap_sub2.protocol_reference_id
-                ) ae ON ap.id = ae.protocol_reference_id
+                    GROUP BY pe_sub.protocol_id
+                ) ae ON ap.id = ae.protocol_id
             ";
 
-            $tableName = "admin_protocols ap";
+            $tableName = "affiliator_protocols ap";
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,

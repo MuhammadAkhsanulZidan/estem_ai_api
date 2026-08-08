@@ -351,7 +351,9 @@ class ChatbotController
                 foreach ($docs as $doc) {
                     $docName = basename($doc['document_path']);
                     $relPath = str_replace('public/bck/', '', $doc['document_path']);
-                    $docUrl = "https://api-estemai.zendekia.com/v1/public/bck/" . implode('/', array_map('rawurlencode', explode('/', $relPath)));
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || ($_SERVER['SERVER_PORT'] ?? 80) == 443) ? "https://" : "http://";
+                    $apiBase = $protocol . ($_SERVER['HTTP_HOST'] ?? 'api-estemai.zendekia.com');
+                    $docUrl = $apiBase . "/v1/public/bck/" . implode('/', array_map('rawurlencode', explode('/', $relPath)));
                     $message .= "  - [" . $docName . "](" . $docUrl . ")\n";
                 }
                 $message .= "\n";
@@ -436,7 +438,9 @@ class ChatbotController
                 foreach ($docs as $doc) {
                     $docName = basename($doc['document_path']);
                     $relPath = str_replace('public/bck/', '', $doc['document_path']);
-                    $docUrl = "https://api-estemai.zendekia.com/v1/public/bck/" . implode('/', array_map('rawurlencode', explode('/', $relPath)));
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || ($_SERVER['SERVER_PORT'] ?? 80) == 443) ? "https://" : "http://";
+                    $apiBase = $protocol . ($_SERVER['HTTP_HOST'] ?? 'api-estemai.zendekia.com');
+                    $docUrl = $apiBase . "/v1/public/bck/" . implode('/', array_map('rawurlencode', explode('/', $relPath)));
                     $message .= "  - [" . $docName . "](" . $docUrl . ")\n";
                 }
                 $message .= "\n";
@@ -723,8 +727,7 @@ class ChatbotController
                 FROM patient_ecrfs pe
                 LEFT JOIN affiliators a ON pe.affiliator_id = a.id
                 LEFT JOIN affiliator_protocols ap_inst ON pe.protocol_id = ap_inst.id
-                LEFT JOIN admin_protocols ap_master ON ap_inst.protocol_reference_id = ap_master.id
-                LEFT JOIN admin_protocol_ecrfs ap ON ap_master.id = ap.protocol_id AND ap.section_id = 1
+                LEFT JOIN affiliator_protocol_ecrfs ap ON ap_inst.id = ap.protocol_id AND ap.section_id = 1
                 LEFT JOIN patient_ecrf_responses r ON pe.id = r.patient_id AND r.section_id = 1
                 WHERE pe.patient_initial ILIKE :search
             ";
@@ -748,8 +751,12 @@ class ChatbotController
                 $regNum = $patientData['registration_number'];
                 $hospital = $patientData['affiliator_name'] ?? 'N/A';
                 
-                $schemaJson = $patientData['questions_schema'] ? json_decode($patientData['questions_schema'], true) : [];
                 $answersJson = $patientData['answers_data'] ? json_decode($patientData['answers_data'], true) : [];
+                // Fetch template questions for section 1 (Persiapan)
+                $gStmt = $pdo->prepare("SELECT questions_schema FROM ecrf_templates WHERE section_id = 1");
+                $gStmt->execute();
+                $gRow = $gStmt->fetch();
+                $schemaJson = $gRow ? json_decode($gRow['questions_schema'] ?? '[]', true) : [];
 
                 $inclusionLabel = 'N/A';
                 $exclusionLabel = 'N/A';
@@ -794,8 +801,8 @@ class ChatbotController
         if ($protocolSearch !== null) {
             $sql = "
                 SELECT ap.questions_schema, am.protocol_name
-                FROM admin_protocol_ecrfs ap
-                JOIN admin_protocols am ON ap.protocol_id = am.id
+                FROM affiliator_protocol_ecrfs ap
+                JOIN affiliator_protocols am ON ap.protocol_id = am.id
                 WHERE ap.section_id = 1 AND am.protocol_name ILIKE :search
                 LIMIT 1
             ";
@@ -803,7 +810,11 @@ class ChatbotController
 
             if ($protoData) {
                 $name = $protoData['protocol_name'];
-                $schemaJson = $protoData['questions_schema'] ? json_decode($protoData['questions_schema'], true) : [];
+                // Fetch template questions for section 1 (Persiapan)
+                $gStmt = $pdo->prepare("SELECT questions_schema FROM ecrf_templates WHERE section_id = 1");
+                $gStmt->execute();
+                $gRow = $gStmt->fetch();
+                $schemaJson = $gRow ? json_decode($gRow['questions_schema'] ?? '[]', true) : [];
 
                 $inclusionOpts = [];
                 $exclusionOpts = [];
@@ -897,8 +908,10 @@ class ChatbotController
             // Strip local public/bck prefix to get relative path
             $relPath = str_replace('/var/www/html/estem_ai_api/api/public/bck/', '', $filePath);
             
+            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || ($_SERVER['SERVER_PORT'] ?? 80) == 443) ? "https://" : "http://";
+            $apiBase = $protocol . ($_SERVER['HTTP_HOST'] ?? 'api-estemai.zendekia.com');
             // Build correct absolute URL served by Nginx /v1/public/ location block
-            $pdfLink = "https://api-estemai.zendekia.com/v1/public/bck/" . implode('/', array_map('rawurlencode', explode('/', $relPath))) . "#page=" . $page;
+            $pdfLink = $apiBase . "/v1/public/bck/" . implode('/', array_map('rawurlencode', explode('/', $relPath))) . "#page=" . $page;
 
             $message .= "> ... " . $excerpt . " ...\n\n";
             $message .= "*(Sumber: [" . $docName . "](" . $pdfLink . "), Halaman " . $page . " - Kecocokan: " . $score . "% )*\n";

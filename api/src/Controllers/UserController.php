@@ -8,6 +8,7 @@ use App\Helpers\RequestHelper;
 use App\Constants\Role_Id;
 use App\Constants\Level_Id;
 use App\Helpers\StatusHelper;
+use App\Middleware\AuthMiddleware;
 
 use PDO;
 
@@ -24,7 +25,7 @@ class UserController
 
             if ($id !== null) {
                 $stmt = $pdo->prepare("
-                    SELECT u.id, u.username, u.role_id, u.level_id, u.email, u.affiliator_id, u.is_approved, u.is_reviewed, u.created_at, u.updated_at, a.affiliator_name
+                    SELECT u.id, u.username, u.full_name, u.role_id, u.level_id, u.email, u.affiliator_id, u.is_approved, u.is_reviewed, u.avatar, u.created_at, u.updated_at, a.affiliator_name
                     FROM users u
                     LEFT JOIN affiliators a ON u.affiliator_id = a.id
                     WHERE u.id = :id
@@ -83,9 +84,9 @@ class UserController
             $query = "
                 SELECT * FROM (
                     SELECT
-                        u.id, u.username, u.email, u.is_approved, u.is_reviewed,
+                        u.id, u.username, u.full_name, u.email, u.is_approved, u.is_reviewed,
                         u.role_id, u.level_id,
-                        u.affiliator_id, a.affiliator_name,
+                        u.affiliator_id, a.affiliator_name, u.avatar,
                         u.created_at
                     FROM users u
                     LEFT JOIN affiliators a ON u.affiliator_id = a.id
@@ -95,7 +96,7 @@ class UserController
             ";
 
             // Dynamic table expression for pagination counting
-            $tableName = "(SELECT u.id, u.username, u.email, u.is_approved, u.is_reviewed, u.role_id, u.level_id, u.affiliator_id, u.created_at FROM users u LEFT JOIN affiliators a ON u.affiliator_id = a.id {$statusWhere}) A";
+            $tableName = "(SELECT u.id, u.username, u.full_name, u.email, u.is_approved, u.is_reviewed, u.role_id, u.level_id, u.affiliator_id, u.avatar, u.created_at FROM users u LEFT JOIN affiliators a ON u.affiliator_id = a.id {$statusWhere}) A";
 
             $responseData = RequestHelper::paginate(
                 pdo: $pdo,
@@ -129,19 +130,31 @@ class UserController
             $data = RequestHelper::getBody();
 
             $username = trim($data['username'] ?? '');
+            $fullName = trim($data['full_name'] ?? '');
             $roleId = $data['role_id'] ?? null;
             $levelId = $data['level_id'] ?? null;
             $email = trim($data['email'] ?? '');
             $password = $data['password'] ?? '';
 
-            if (empty($username) || $roleId === null || $levelId === null || empty($email) || empty($password)) {
-                (new ApiResponse(false, 'Username, role_id, level_id, email, and password are required'))->send(400);
+            if (empty($username) || empty($fullName) || $roleId === null || $levelId === null || empty($email) || empty($password)) {
+                (new ApiResponse(false, 'Username, full name, role_id, level_id, email, and password are required'))->send(400);
+            }
+
+            if (preg_match('/\s/', $username)) {
+                (new ApiResponse(false, 'Username cannot contain spaces'))->send(400);
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
             $affiliatorId = $data['affiliator_id'] ?? null;
             $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : true;
             $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : true;
+
+            // Check if username already exists globally
+            $checkUser = $pdo->prepare("SELECT id FROM users WHERE username = :username");
+            $checkUser->execute(['username' => $username]);
+            if ($checkUser->fetch()) {
+                (new ApiResponse(false, 'Username already exists'))->send(400);
+            }
 
             // Check if email already exists
             $checkStmt = $pdo->prepare("SELECT id FROM users WHERE email = :email");
@@ -150,13 +163,16 @@ class UserController
                 (new ApiResponse(false, 'Email already exists'))->send(400);
             }
 
+            $avatarId = rand(1, 17);
+
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, is_approved, is_reviewed, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_approved, :is_reviewed, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
+                INSERT INTO users (username, full_name, role_id, level_id, email, password_hash, affiliator_id, is_approved, is_reviewed, avatar, created_at, updated_at)
+                VALUES (:username, :full_name, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_approved, :is_reviewed, :avatar, NOW(), NOW())
+                RETURNING id, username, full_name, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, avatar, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $stmt->bindValue(':full_name', $fullName, PDO::PARAM_STR);
             $stmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
             $stmt->bindValue(':level_id', $levelId, PDO::PARAM_INT);
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
@@ -164,6 +180,7 @@ class UserController
             $stmt->bindValue(':affiliator_id', $affiliatorId, $affiliatorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
+            $stmt->bindValue(':avatar', $avatarId, PDO::PARAM_INT);
 
             $stmt->execute();
             $newUser = $stmt->fetch();
@@ -180,6 +197,9 @@ class UserController
     public function put()
     {
         try {
+            $currentUser = AuthMiddleware::authorize();
+            $currentUserId = (int)($currentUser['data']['id'] ?? 0);
+
             $pdo = Database::getConnection();
             $data = RequestHelper::getBody();
 
@@ -189,7 +209,7 @@ class UserController
             }
 
             // Check if user exists
-            $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = :id");
+            $stmt = $pdo->prepare("SELECT role_id, level_id, full_name, avatar, password_hash, affiliator_id, is_approved, is_reviewed FROM users WHERE id = :id");
             $stmt->execute(['id' => $id]);
             $existingUser = $stmt->fetch();
             if (!$existingUser) {
@@ -200,9 +220,23 @@ class UserController
             $roleId = $data['role_id'] ?? null;
             $levelId = $data['level_id'] ?? null;
             $email = trim($data['email'] ?? '');
+            $fullName = trim($data['full_name'] ?? '');
+            $avatar = isset($data['avatar']) ? (int)$data['avatar'] : null;
 
-            if (empty($username) || $roleId === null || $levelId === null || empty($email)) {
-                (new ApiResponse(false, 'Username, role_id, level_id, and email are required'))->send(400);
+            if (empty($username) || empty($email)) {
+                (new ApiResponse(false, 'Username and email are required'))->send(400);
+            }
+
+            // Check if username already exists for another user
+            $checkUser = $pdo->prepare("SELECT id FROM users WHERE username = :username AND id != :id");
+            $checkUser->execute(['username' => $username, 'id' => $id]);
+            if ($checkUser->fetch()) {
+                (new ApiResponse(false, 'Username already in use by another user'))->send(400);
+            }
+
+            // Check if username contains spaces
+            if (preg_match('/\s/', $username)) {
+                (new ApiResponse(false, 'Username cannot contain spaces'))->send(400);
             }
 
             // Check if email already exists for another user
@@ -212,16 +246,40 @@ class UserController
                 (new ApiResponse(false, 'Email already in use by another user'))->send(400);
             }
 
-            $password = $data['password'] ?? '';
-            $passwordHash = !empty($password) ? password_hash($password, PASSWORD_BCRYPT) : $existingUser['password_hash'];
+            // Fallback assignments
+            $roleId = $roleId !== null ? (int)$roleId : (int)$existingUser['role_id'];
+            $levelId = $levelId !== null ? (int)$levelId : (int)$existingUser['level_id'];
+            $fullName = !empty($fullName) ? $fullName : ($existingUser['full_name'] ?? '');
+            $avatar = $avatar !== null ? $avatar : (isset($existingUser['avatar']) ? (int)$existingUser['avatar'] : 1);
 
-            $affiliatorId = $data['affiliator_id'] ?? null;
-            $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : true;
-            $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : true;
+            $password = $data['password'] ?? '';
+            $oldPassword = $data['old_password'] ?? '';
+
+            if (!empty($password)) {
+                // If editing own profile, require old password verification
+                if ($currentUserId === (int)$id) {
+                    if (empty($oldPassword)) {
+                        (new ApiResponse(false, 'Password lama wajib diisi untuk mengubah password'))->send(400);
+                        return;
+                    }
+                    if (!password_verify($oldPassword, $existingUser['password_hash'])) {
+                        (new ApiResponse(false, 'Password lama tidak sesuai'))->send(400);
+                        return;
+                    }
+                }
+                $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+            } else {
+                $passwordHash = $existingUser['password_hash'];
+            }
+
+            $affiliatorId = isset($data['affiliator_id']) ? $data['affiliator_id'] : $existingUser['affiliator_id'];
+            $isApproved = isset($data['is_approved']) ? (bool)$data['is_approved'] : (bool)$existingUser['is_approved'];
+            $isReviewed = isset($data['is_reviewed']) ? (bool)$data['is_reviewed'] : (bool)$existingUser['is_reviewed'];
 
             $stmt = $pdo->prepare("
                 UPDATE users
                 SET username = :username,
+                    full_name = :full_name,
                     role_id = :role_id,
                     level_id = :level_id,
                     email = :email,
@@ -229,12 +287,14 @@ class UserController
                     affiliator_id = :affiliator_id,
                     is_approved = :is_approved,
                     is_reviewed = :is_reviewed,
+                    avatar = :avatar,
                     updated_at = NOW()
                 WHERE id = :id
-                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
+                RETURNING id, username, full_name, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, avatar, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $stmt->bindValue(':full_name', $fullName, PDO::PARAM_STR);
             $stmt->bindValue(':role_id', $roleId, PDO::PARAM_INT);
             $stmt->bindValue(':level_id', $levelId, PDO::PARAM_INT);
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
@@ -242,6 +302,7 @@ class UserController
             $stmt->bindValue(':affiliator_id', $affiliatorId, $affiliatorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
+            $stmt->bindValue(':avatar', $avatar, PDO::PARAM_INT);
             $stmt->bindValue(':id', $id, PDO::PARAM_INT);
 
             $stmt->execute();
@@ -362,34 +423,49 @@ class UserController
             $data = RequestHelper::getBody();
 
             $username = trim($data['username'] ?? '');
+            $fullName = trim($data['full_name'] ?? '');
             $email = trim($data['email'] ?? '');
             $password = $data['password'] ?? '';
             $affiliatorId = $data['affiliator_id'] ?? null;
 
-            if (empty($username) || empty($email) || empty($password) || $affiliatorId === null) {
-                (new ApiResponse(false, 'Username, email, password, and affiliator_id are required'))->send(400);
+            if (empty($username) || empty($fullName) || empty($email) || empty($password) || $affiliatorId === null) {
+                (new ApiResponse(false, 'Username, full name, email, password, and affiliator_id are required'))->send(400);
+            }
+
+            if (preg_match('/\s/', $username)) {
+                (new ApiResponse(false, 'Username cannot contain spaces'))->send(400);
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
             $isApproved = false; // Must be approved by admin
             $isReviewed = false;
 
-            // Check if email already exists
-            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username AND affiliator_id = :affiliator_id");
+            // Check if username already exists globally
+            $checkStmt = $pdo->prepare("SELECT id FROM users WHERE username = :username");
             $checkStmt->bindValue(':username', $username, PDO::PARAM_STR);
-            $checkStmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
             $checkStmt->execute();
             if ($checkStmt->fetch()) {
+                (new ApiResponse(false, 'Username already exists'))->send(400);
+            }
+
+            // Check if email already exists globally
+            $checkEmail = $pdo->prepare("SELECT id FROM users WHERE email = :email");
+            $checkEmail->bindValue(':email', $email, PDO::PARAM_STR);
+            $checkEmail->execute();
+            if ($checkEmail->fetch()) {
                 (new ApiResponse(false, 'Email already exists'))->send(400);
             }
 
+            $avatarId = rand(1, 17);
+
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, affiliator_id, is_approved, is_reviewed, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_approved, :is_reviewed, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, created_at, updated_at
+                INSERT INTO users (username, full_name, role_id, level_id, email, password_hash, affiliator_id, is_approved, is_reviewed, avatar, created_at, updated_at)
+                VALUES (:username, :full_name, :role_id, :level_id, :email, :password_hash, :affiliator_id, :is_approved, :is_reviewed, :avatar, NOW(), NOW())
+                RETURNING id, username, full_name, role_id, level_id, email, affiliator_id, is_approved, is_reviewed, avatar, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $stmt->bindValue(':full_name', $fullName, PDO::PARAM_STR);
             $stmt->bindValue(':role_id', ROLE_ID::AFFILIATOR, PDO::PARAM_INT);
             $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT);
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
@@ -397,6 +473,7 @@ class UserController
             $stmt->bindValue(':affiliator_id', $affiliatorId, PDO::PARAM_INT);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
+            $stmt->bindValue(':avatar', $avatarId, PDO::PARAM_INT);
 
             $stmt->execute();
             $newUser = $stmt->fetch();
@@ -417,11 +494,16 @@ class UserController
             $data = RequestHelper::getBody();
 
             $username = trim($data['username'] ?? '');
+            $fullName = trim($data['full_name'] ?? '');
             $email = trim($data['email'] ?? '');
             $password = $data['password'] ?? '';
 
-            if (empty($username) || empty($email) || empty($password)) {
-                (new ApiResponse(false, 'Username, email, and password are required'))->send(400);
+            if (empty($username) || empty($fullName) || empty($email) || empty($password)) {
+                (new ApiResponse(false, 'Username, full name, email, and password are required'))->send(400);
+            }
+
+            if (preg_match('/\s/', $username)) {
+                (new ApiResponse(false, 'Username cannot contain spaces'))->send(400);
             }
 
             $passwordHash = password_hash($password, PASSWORD_BCRYPT);
@@ -436,24 +518,78 @@ class UserController
                 (new ApiResponse(false, 'Username already exists'))->send(400);
             }
 
+            // Check if email already exists globally
+            $checkEmail = $pdo->prepare("SELECT id FROM users WHERE email = :email");
+            $checkEmail->bindValue(':email', $email, PDO::PARAM_STR);
+            $checkEmail->execute();
+            if ($checkEmail->fetch()) {
+                (new ApiResponse(false, 'Email already exists'))->send(400);
+            }
+
+            $avatarId = rand(1, 17);
+
             $stmt = $pdo->prepare("
-                INSERT INTO users (username, role_id, level_id, email, password_hash, is_approved, is_reviewed, created_at, updated_at)
-                VALUES (:username, :role_id, :level_id, :email, :password_hash, :is_approved, :is_reviewed, NOW(), NOW())
-                RETURNING id, username, role_id, level_id, email, is_approved, is_reviewed, created_at, updated_at
+                INSERT INTO users (username, full_name, role_id, level_id, email, password_hash, is_approved, is_reviewed, avatar, created_at, updated_at)
+                VALUES (:username, :full_name, :role_id, :level_id, :email, :password_hash, :is_approved, :is_reviewed, :avatar, NOW(), NOW())
+                RETURNING id, username, full_name, role_id, level_id, email, is_approved, is_reviewed, avatar, created_at, updated_at
             ");
 
             $stmt->bindValue(':username', $username, PDO::PARAM_STR);
+            $stmt->bindValue(':full_name', $fullName, PDO::PARAM_STR);
             $stmt->bindValue(':role_id', ROLE_ID::REVIEWER, PDO::PARAM_INT);
             $stmt->bindValue(':level_id', LEVEL_ID::SYSUSER, PDO::PARAM_INT); // Level 1 for standard user
             $stmt->bindValue(':email', $email, PDO::PARAM_STR);
             $stmt->bindValue(':password_hash', $passwordHash, PDO::PARAM_STR);
             $stmt->bindValue(':is_approved', $isApproved, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $isReviewed, PDO::PARAM_BOOL);
+            $stmt->bindValue(':avatar', $avatarId, PDO::PARAM_INT);
 
             $stmt->execute();
             $newUser = $stmt->fetch();
 
             (new ApiResponse(true, 'Registration successful, awaiting administrator approval', $newUser))->send(201);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Reset a user's password to 12345.
+     */
+    public function reset_password()
+    {
+        try {
+            $currentUser = AuthMiddleware::authorize(['admin']); // Only admin can reset passwords
+
+            $pdo = Database::getConnection();
+            $data = RequestHelper::getBody();
+
+            $id = $_GET['id'] ?? $data['id'] ?? null;
+            if ($id === null) {
+                (new ApiResponse(false, 'User ID is required'))->send(400);
+            }
+
+            // Check if user exists
+            $stmt = $pdo->prepare("SELECT id FROM users WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            if (!$stmt->fetch()) {
+                (new ApiResponse(false, 'User not found'))->send(404);
+            }
+
+            $passwordHash = password_hash('12345', PASSWORD_BCRYPT);
+
+            $updateStmt = $pdo->prepare("
+                UPDATE users
+                SET password_hash = :password_hash,
+                    updated_at = NOW()
+                WHERE id = :id
+            ");
+            $updateStmt->execute([
+                'password_hash' => $passwordHash,
+                'id' => $id
+            ]);
+
+            (new ApiResponse(true, 'Password successfully reset to 12345'))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }

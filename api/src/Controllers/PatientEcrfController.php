@@ -15,54 +15,75 @@ class PatientEcrfController
      */
     public function get()
     {
-        $user = AuthMiddleware::authorize(['affiliator', 'admin']);
+        $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
 
         try {
             $pdo = Database::getConnection();
 
             $patientId = $_GET['patient_id'] ?? null;
             $protocolId = $_GET['protocol_id'] ?? null;
+            $sessionNumber = isset($_GET['session_number']) ? (int)$_GET['session_number'] : 1;
 
             if ($patientId === null || $protocolId === null) {
                 (new ApiResponse(false, 'Patient ID and Protocol ID are required'))->send(400);
             }
 
-            // 1. Fetch eCRF template sections using admin protocol questions
+            // 1. Fetch E-CRF template sections
             $stmt = $pdo->prepare("
-                SELECT
-                    es.id AS section_id,
-                    es.section_name,
-                    ape.questions_schema
-                FROM ecrf_sections es
-                LEFT JOIN admin_protocol_ecrfs ape
-                    ON es.id = ape.section_id AND ape.protocol_id = (
-                        SELECT protocol_reference_id 
-                        FROM affiliator_protocols 
-                        WHERE id = :protocol_id
-                    )
-                ORDER BY es.id ASC
+                SELECT id AS section_id, section_name
+                FROM ecrf_sections
+                ORDER BY id ASC
             ");
-            $stmt->execute(['protocol_id' => $protocolId]);
+            $stmt->execute();
             $templateRows = $stmt->fetchAll();
 
-            // 2. Fetch patient responses
+            // Fetch E-CRF template questions
+            $globalStmt = $pdo->prepare("SELECT section_id, questions_schema FROM ecrf_templates");
+            $globalStmt->execute();
+            $globals = $globalStmt->fetchAll(PDO::FETCH_ASSOC);
+            $globalSchemaMap = [];
+            foreach ($globals as $g) {
+                $globalSchemaMap[(int)$g['section_id']] = json_decode($g['questions_schema'] ?? '[]', true) ?: [];
+            }
+
+            // 2. Fetch patient responses for this specific session
             $resStmt = $pdo->prepare("
-                SELECT section_id, answers_data, is_posted, is_approved, reviewer_note
+                SELECT id, section_id, answers_data, is_posted, is_approved, is_revised, is_reviewed, reviewer_note
                 FROM patient_ecrf_responses
-                WHERE patient_id = :patient_id AND protocol_id = :protocol_id
+                WHERE patient_id = :patient_id AND protocol_id = :protocol_id AND session_number = :session_number
             ");
-            $resStmt->execute(['patient_id' => $patientId, 'protocol_id' => $protocolId]);
+            $resStmt->execute([
+                'patient_id'     => $patientId,
+                'protocol_id'    => $protocolId,
+                'session_number' => $sessionNumber
+            ]);
             $responseRows = $resStmt->fetchAll();
 
             $responses = [];
             foreach ($responseRows as $r) {
                 $responses[(int)$r['section_id']] = [
+                    'id' => (int)$r['id'],
                     'answers' => json_decode($r['answers_data'] ?? '{}', true) ?: new \stdClass(),
                     'is_posted' => (bool)$r['is_posted'],
                     'is_approved' => (bool)$r['is_approved'],
+                    'is_revised' => (bool)$r['is_revised'],
+                    'is_reviewed' => (bool)$r['is_reviewed'],
                     'reviewer_note' => $r['reviewer_note']
                 ];
             }
+
+            // 3. Fetch all saved sessions / iterations for this patient
+            $sessionsStmt = $pdo->prepare("
+                SELECT DISTINCT id, section_id, session_number, is_posted, is_approved, is_revised, is_reviewed, reviewer_note
+                FROM patient_ecrf_responses
+                WHERE patient_id = :patient_id AND protocol_id = :protocol_id
+                ORDER BY session_number ASC
+            ");
+            $sessionsStmt->execute([
+                'patient_id'  => $patientId,
+                'protocol_id' => $protocolId
+            ]);
+            $allSessionsList = $sessionsStmt->fetchAll(PDO::FETCH_ASSOC);
 
             $rawSections = [
                 1 => [],
@@ -73,58 +94,71 @@ class PatientEcrfController
 
             foreach ($templateRows as $row) {
                 $secId = (int)$row['section_id'];
-                $rawSections[$secId] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
+                $customQuestions = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
+                $globalQuestions = $globalSchemaMap[$secId] ?? [];
+                
+                // Merge global and custom questions (with global questions prepended)
+                $rawSections[$secId] = array_merge($globalQuestions, $customQuestions);
             }
 
-            // 3. Compute dynamic locking logic based on preceding approvals
-            $s1Approved = !empty($responses[1]['is_approved']);
-            $s2Approved = $s1Approved && !empty($responses[2]['is_approved']);
-            $s3Approved = $s2Approved && !empty($responses[3]['is_approved']);
-
-            $isL2Locked = !$s1Approved;
-            $isL3Locked = $isL2Locked || !$s2Approved;
-            $isL4Locked = $isL3Locked || !$s3Approved;
-
+            // Lock logic is disabled because flow is non-sequential as requested
             $sections = [
                 'persiapan' => [
+                    'id' => $responses[1]['id'] ?? null,
                     'section_id' => 1,
                     'questions' => $rawSections[1],
                     'answers' => $responses[1]['answers'] ?? new \stdClass(),
                     'is_posted' => $responses[1]['is_posted'] ?? false,
                     'is_approved' => $responses[1]['is_approved'] ?? false,
+                    'is_reviewed' => $responses[1]['is_reviewed'] ?? false,
+                    'is_revised' => $responses[1]['is_revised'] ?? false,
                     'reviewer_note' => $responses[1]['reviewer_note'] ?? null,
                     'is_locked' => false
                 ],
                 'pelaksanaan' => [
+                    'id' => $responses[2]['id'] ?? null,
                     'section_id' => 2,
                     'questions' => $rawSections[2],
                     'answers' => $responses[2]['answers'] ?? new \stdClass(),
                     'is_posted' => $responses[2]['is_posted'] ?? false,
                     'is_approved' => $responses[2]['is_approved'] ?? false,
+                    'is_reviewed' => $responses[2]['is_reviewed'] ?? false,
+                    'is_revised' => $responses[2]['is_revised'] ?? false,
                     'reviewer_note' => $responses[2]['reviewer_note'] ?? null,
-                    'is_locked' => $isL2Locked
+                    'is_locked' => false
                 ],
                 'monitoring' => [
+                    'id' => $responses[3]['id'] ?? null,
                     'section_id' => 3,
                     'questions' => $rawSections[3],
                     'answers' => $responses[3]['answers'] ?? new \stdClass(),
                     'is_posted' => $responses[3]['is_posted'] ?? false,
                     'is_approved' => $responses[3]['is_approved'] ?? false,
+                    'is_reviewed' => $responses[3]['is_reviewed'] ?? false,
+                    'is_revised' => $responses[3]['is_revised'] ?? false,
                     'reviewer_note' => $responses[3]['reviewer_note'] ?? null,
-                    'is_locked' => $isL3Locked
+                    'is_locked' => false
                 ],
                 'evaluasi' => [
+                    'id' => $responses[4]['id'] ?? null,
                     'section_id' => 4,
                     'questions' => $rawSections[4],
                     'answers' => $responses[4]['answers'] ?? new \stdClass(),
                     'is_posted' => $responses[4]['is_posted'] ?? false,
                     'is_approved' => $responses[4]['is_approved'] ?? false,
+                    'is_reviewed' => $responses[4]['is_reviewed'] ?? false,
+                    'is_revised' => $responses[4]['is_revised'] ?? false,
                     'reviewer_note' => $responses[4]['reviewer_note'] ?? null,
-                    'is_locked' => $isL4Locked
+                    'is_locked' => false
                 ]
             ];
 
-            (new ApiResponse(true, 'Patient eCRF data retrieved', $sections))->send(200);
+            $responsePayload = [
+                'sections' => $sections,
+                'all_sessions' => $allSessionsList
+            ];
+
+            (new ApiResponse(true, 'Patient eCRF data retrieved', $responsePayload))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -146,40 +180,23 @@ class PatientEcrfController
             $sectionId = $data['section_id'] ?? null;
             $answersData = $data['answers_data'] ?? [];
             $isPosted = !empty($data['is_posted']);
+            $sessionNumber = isset($data['session_number']) ? (int)$data['session_number'] : 1;
 
             if ($patientId === null || $protocolId === null || $sectionId === null) {
                 (new ApiResponse(false, 'Patient ID, Protocol ID, and Section ID are required'))->send(400);
             }
 
-            // 1. Perform template and lock checking before saving
-            if ((int)$sectionId > 1) {
-                $prevSecId = (int)$sectionId - 1;
-                $chk = $pdo->prepare("SELECT is_approved FROM patient_ecrf_responses WHERE patient_id = :patient_id AND protocol_id = :protocol_id AND section_id = :section_id");
-                $chk->execute([
-                    'patient_id' => $patientId,
-                    'protocol_id' => $protocolId,
-                    'section_id' => $prevSecId
-                ]);
-                $prevRes = $chk->fetch();
-                if (!$prevRes || !$prevRes['is_approved']) {
-                    (new ApiResponse(false, 'Cannot save answers because previous section is locked or not approved by reviewer.'))->send(403);
-                }
-            }
-
-            // 2. Perform validations if is_posted is true
+            // 1. Perform validations if is_posted is true
             if ($isPosted) {
-                $tStmt = $pdo->prepare("
+                // Fetch template questions
+                $gStmt = $pdo->prepare("
                     SELECT questions_schema 
-                    FROM admin_protocol_ecrfs 
-                    WHERE section_id = :section_id AND protocol_id = (
-                        SELECT protocol_reference_id 
-                        FROM affiliator_protocols 
-                        WHERE id = :protocol_id
-                    )
+                    FROM ecrf_templates 
+                    WHERE section_id = :section_id
                 ");
-                $tStmt->execute(['protocol_id' => $protocolId, 'section_id' => $sectionId]);
-                $tRow = $tStmt->fetch();
-                $questions = $tRow ? json_decode($tRow['questions_schema'] ?? '[]', true) : [];
+                $gStmt->execute(['section_id' => $sectionId]);
+                $gRow = $gStmt->fetch();
+                $questions = $gRow ? json_decode($gRow['questions_schema'] ?? '[]', true) : [];
 
                 foreach ($questions as $q) {
                     if (!empty($q['required'])) {
@@ -196,16 +213,23 @@ class PatientEcrfController
             $userId = $user['data']['id'];
             $jsonAnswers = json_encode($answersData);
 
-            // 1. Check if response already exists
-            $stmt = $pdo->prepare("SELECT * FROM patient_ecrf_responses WHERE patient_id = :patient_id AND protocol_id = :protocol_id AND section_id = :section_id");
+            // Check if response already exists
+            $stmt = $pdo->prepare("
+                SELECT * FROM patient_ecrf_responses 
+                WHERE patient_id = :patient_id 
+                  AND protocol_id = :protocol_id 
+                  AND section_id = :section_id 
+                  AND session_number = :session_number
+            ");
             $stmt->execute([
-                'patient_id'  => $patientId,
-                'protocol_id' => $protocolId,
-                'section_id'  => $sectionId
+                'patient_id'     => $patientId,
+                'protocol_id'    => $protocolId,
+                'section_id'     => $sectionId,
+                'session_number' => $sessionNumber
             ]);
             $existing = $stmt->fetch();
 
-            // 2. Map flags depending on submission state
+            // Map flags depending on submission state
             $isReviewed = $existing ? $existing['is_reviewed'] : false;
             $isRevised = $existing ? $existing['is_revised'] : false;
             $isApproved = $existing ? $existing['is_approved'] : false;
@@ -219,7 +243,7 @@ class PatientEcrfController
                 $reviewerNote = null;
             }
 
-            // 3. Insert or Update depending on existence (Standard pattern)
+            // Insert or Update depending on existence
             if ($existing) {
                 $stmt = $pdo->prepare("
                     UPDATE patient_ecrf_responses
@@ -246,21 +270,22 @@ class PatientEcrfController
                 ]);
             } else {
                 $stmt = $pdo->prepare("
-                    INSERT INTO patient_ecrf_responses (patient_id, protocol_id, section_id, answers_data, is_posted, is_reviewed, is_revised, is_approved, reviewer_note, created_by, updated_by, created_at, updated_at)
-                    VALUES (:patient_id, :protocol_id, :section_id, :answers_data::jsonb, :is_posted, :is_reviewed, :is_revised, :is_approved, :reviewer_note, :user_id, :user_id, NOW(), NOW())
+                    INSERT INTO patient_ecrf_responses (patient_id, protocol_id, section_id, session_number, answers_data, is_posted, is_reviewed, is_revised, is_approved, reviewer_note, created_by, updated_by, created_at, updated_at)
+                    VALUES (:patient_id, :protocol_id, :section_id, :session_number, :answers_data::jsonb, :is_posted, :is_reviewed, :is_revised, :is_approved, :reviewer_note, :user_id, :user_id, NOW(), NOW())
                     RETURNING *
                 ");
                 $stmt->execute([
-                    'patient_id'   => $patientId,
-                    'protocol_id'  => $protocolId,
-                    'section_id'   => $sectionId,
-                    'answers_data' => $jsonAnswers,
-                    'is_posted'    => $isPosted ? 'true' : 'false',
-                    'is_reviewed'  => $isReviewed ? 'true' : 'false',
-                    'is_revised'   => $isRevised ? 'true' : 'false',
-                    'is_approved'  => $isApproved ? 'true' : 'false',
-                    'reviewer_note'=> $reviewerNote,
-                    'user_id'      => $userId,
+                    'patient_id'     => $patientId,
+                    'protocol_id'    => $protocolId,
+                    'section_id'     => $sectionId,
+                    'session_number' => $sessionNumber,
+                    'answers_data'   => $jsonAnswers,
+                    'is_posted'      => $isPosted ? 'true' : 'false',
+                    'is_reviewed'    => $isReviewed ? 'true' : 'false',
+                    'is_revised'     => $isRevised ? 'true' : 'false',
+                    'is_approved'    => $isApproved ? 'true' : 'false',
+                    'reviewer_note'  => $reviewerNote,
+                    'user_id'        => $userId,
                 ]);
             }
             $result = $stmt->fetch();
@@ -339,6 +364,7 @@ class PatientEcrfController
                     per.patient_id,
                     per.protocol_id,
                     per.section_id,
+                    per.session_number,
                     per.is_posted,
                     per.is_approved,
                     per.is_reviewed,
@@ -358,7 +384,7 @@ class PatientEcrfController
                 JOIN patient_ecrfs pe ON per.patient_id = pe.id
                 JOIN affiliator_protocols ap ON per.protocol_id = ap.id
                 JOIN ecrf_sections es ON per.section_id = es.id
-                LEFT JOIN admin_protocol_ecrfs ape ON ap.protocol_reference_id = ape.protocol_id AND per.section_id = ape.section_id
+                LEFT JOIN affiliator_protocol_ecrfs ape ON ap.id = ape.protocol_id AND per.section_id = ape.section_id
                 $where
                 ORDER BY per.updated_at DESC
                 LIMIT :limit OFFSET :offset

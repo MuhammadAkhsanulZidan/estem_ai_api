@@ -56,6 +56,8 @@ use App\Controllers\AdverseEventController;
 use App\Controllers\ChatbotController;
 use App\Controllers\AffiliatorSummaryController;
 use App\Controllers\AdminSummaryController;
+use App\Controllers\GlobalEcrfController;
+use App\Controllers\GlobalProtocolTemplateController;
 
 try {
     $router = new Router();
@@ -75,13 +77,19 @@ try {
     $router->put('/v1/admin-protocols', [AdminProtocolController::class, 'put']);
     $router->delete('/v1/admin-protocols', [AdminProtocolController::class, 'delete']);
 
-    $router->get('/v1/admin-protocols/ecrf', [AdminProtocolController::class, 'getEcrf']);
-    $router->post('/v1/admin-protocols/ecrf', [AdminProtocolController::class, 'postEcrf']);
+
+    $router->get('/v1/ecrf-templates', [GlobalEcrfController::class, 'get']);
+    $router->post('/v1/ecrf-templates', [GlobalEcrfController::class, 'post']);
+
+    $router->get('/v1/global-protocol-template', [GlobalProtocolTemplateController::class, 'get']);
+    $router->post('/v1/global-protocol-template', [GlobalProtocolTemplateController::class, 'post']);
+    $router->delete('/v1/global-protocol-template', [GlobalProtocolTemplateController::class, 'delete']);
 
     $router->get('/v1/users', [UserController::class, 'get']);
     $router->post('/v1/users', [UserController::class, 'post']);
     $router->put('/v1/users', [UserController::class, 'put']);
     $router->post('/v1/users/review', [UserController::class, 'review_user']);
+    $router->post('/v1/users/reset-password', [UserController::class, 'reset_password']);
     $router->delete('/v1/users', [UserController::class, 'delete']);
 
     $router->get('/v1/affiliators', [AffiliatorController::class, 'get']);
@@ -101,6 +109,7 @@ try {
     $router->post('/v1/affiliator-protocols/update', [AffiliatorProtocolController::class, 'put']);
     $router->put('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'put']);
     $router->delete('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'delete']);
+    $router->post('/v1/admin/protocols/assign-reviewer', [AffiliatorProtocolController::class, 'assignReviewer']);
     $router->get('/v1/reviewer/affiliator-protocols', [AffiliatorProtocolController::class, 'getReviewList']);
     $router->post('/v1/reviewer/affiliator-protocols/review', [AffiliatorProtocolController::class, 'reviewProtocol']);
     $router->get('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'get']);

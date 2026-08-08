@@ -39,6 +39,7 @@ class AffiliatorSupervisionController
                     $filterField = $_GET['filter_field'] ?? "";
                     $filterValue = $_GET['filter_value'] ?? "";
                     $filterDate  = $_GET['filter_date'] ?? $_GET['date'] ?? ""; // Supports filter_date or date
+                    $filterMonth = $_GET['filter_month'] ?? "";
                     $isPosted    = $_GET['is_posted'] ?? "";
                     $isReviewed  = $_GET['is_reviewed'] ?? "";
                     $isApproved  = $_GET['is_approved'] ?? "";
@@ -64,10 +65,14 @@ class AffiliatorSupervisionController
                         $params['val'] = '%' . $filterValue . '%';
                     }
 
-                    // Date Filter (Matches updated_at / posted_date by date part)
+                    // Date / Month Filters (Matches posted_date or updated_at date part)
                     if ($filterDate !== "") {
-                        $where .= " AND DATE(asup.updated_at) = :filter_date";
+                        $where .= " AND DATE(COALESCE(asup.posted_date, asup.updated_at)) = :filter_date";
                         $params['filter_date'] = $filterDate;
+                    }
+                    if ($filterMonth !== "") {
+                        $where .= " AND TO_CHAR(COALESCE(asup.posted_date, asup.updated_at), 'YYYY-MM') = :filter_month";
+                        $params['filter_month'] = $filterMonth;
                     }
 
                     // Status Filters
@@ -105,7 +110,7 @@ class AffiliatorSupervisionController
                             asup.is_posted as is_posted,
                             aff.affiliator_name,
                             aff.affiliator_type,
-                            asup.updated_at as posted_date,
+                            COALESCE(asup.posted_date, asup.updated_at) as posted_date,
                             aff.address,
                             COALESCE(
                                 (
@@ -235,10 +240,12 @@ class AffiliatorSupervisionController
                 $referenceId = sprintf("EA-RS-%s-%04d", $yearMonth, $count);
             }
 
+            $postedDate = ($isPosted === 'true') ? date('Y-m-d H:i:s') : null;
+
             // 2. Perform UPSERT on supervision metadata
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, is_reviewed, is_approved, is_revised, created_by, updated_by, created_at, updated_at)
-                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, false, false, false, :user_id, :user_id, NOW(), NOW())
+                INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, is_reviewed, is_approved, is_revised, created_by, updated_by, created_at, updated_at, posted_date)
+                VALUES (:reference_id, :affiliator_id, :pic_name, :is_posted, false, false, false, :user_id, :user_id, NOW(), NOW(), :posted_date)
                 ON CONFLICT (affiliator_id)
                 DO UPDATE SET
                     pic_name = EXCLUDED.pic_name,
@@ -247,7 +254,8 @@ class AffiliatorSupervisionController
                     is_approved = false,
                     is_revised = false,
                     updated_by = EXCLUDED.updated_by,
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    posted_date = CASE WHEN EXCLUDED.is_posted = true AND affiliator_supervisions.posted_date IS NULL THEN NOW() ELSE affiliator_supervisions.posted_date END
                 RETURNING *
             ");
             $stmt->execute([
@@ -255,7 +263,8 @@ class AffiliatorSupervisionController
                 'affiliator_id' => $affiliatorId,
                 'pic_name' => $picName,
                 'is_posted' => $isPosted,
-                'user_id' => $userId
+                'user_id' => $userId,
+                'posted_date' => $postedDate
             ]);
 
             $supervision = $stmt->fetch();
@@ -357,7 +366,7 @@ class AffiliatorSupervisionController
      */
     public function review()
     {
-        $user = AuthMiddleware::authorize(['admin', 'reviewer']);
+        $user = AuthMiddleware::authorize(['admin']);
 
         try {
             $pdo = Database::getConnection();

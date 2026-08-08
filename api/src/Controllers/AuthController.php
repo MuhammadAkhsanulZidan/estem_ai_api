@@ -25,12 +25,12 @@ class AuthController {
                 (new ApiResponse(false, 'Username, password, and role are required'))->send(400);
             }
 
-            // Fetch user from PostgreSQL using prepared statements
+            // Fetch user from PostgreSQL using prepared statements (match username or email)
             $stmt = $pdo->prepare("
-                SELECT u.id, u.username, u.role_id, r.name as role_name, u.password_hash, u.affiliator_id
+                SELECT u.id, u.username, u.full_name, u.role_id, r.name as role_name, u.password_hash, u.affiliator_id, u.avatar
                 FROM users AS u
                 LEFT JOIN roles AS r ON u.role_id = r.id
-                WHERE username = :username
+                WHERE (u.username = :username OR u.email = :username)
                 AND u.role_id = :role_id
                 AND u.is_approved = TRUE
             ");
@@ -56,8 +56,10 @@ class AuthController {
                     'data' => [
                         'id' => $user['id'],
                         'username' => $user['username'],
+                        'full_name' => $user['full_name'],
                         'role_name'=> $user['role_name'],
-                        'affiliator_id' => $user['affiliator_id'] !== null ? (int)$user['affiliator_id'] : null
+                        'affiliator_id' => $user['affiliator_id'] !== null ? (int)$user['affiliator_id'] : null,
+                        'avatar' => (int)($user['avatar'] ?? 1)
                     ]
                 ];
 
@@ -69,8 +71,10 @@ class AuthController {
                     'data' => [
                         'id' => $user['id'],
                         'username' => $user['username'],
+                        'full_name' => $user['full_name'],
                         'role_name'=> $user['role_name'],
-                        'affiliator_id' => $user['affiliator_id'] !== null ? (int)$user['affiliator_id'] : null
+                        'affiliator_id' => $user['affiliator_id'] !== null ? (int)$user['affiliator_id'] : null,
+                        'avatar' => (int)($user['avatar'] ?? 1)
                     ]
                 ];
 
