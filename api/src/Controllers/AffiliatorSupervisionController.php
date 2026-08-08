@@ -38,8 +38,9 @@ class AffiliatorSupervisionController
                 if ($roleName === "admin" || $roleName === "reviewer") {
                     $filterField = $_GET['filter_field'] ?? "";
                     $filterValue = $_GET['filter_value'] ?? "";
-                    $filterDate  = $_GET['filter_date'] ?? $_GET['date'] ?? ""; // Supports filter_date or date
+                    $filterDay   = $_GET['filter_day'] ?? "";
                     $filterMonth = $_GET['filter_month'] ?? "";
+                    $filterYear  = $_GET['filter_year'] ?? "";
                     $isPosted    = $_GET['is_posted'] ?? "";
                     $isReviewed  = $_GET['is_reviewed'] ?? "";
                     $isApproved  = $_GET['is_approved'] ?? "";
@@ -65,14 +66,18 @@ class AffiliatorSupervisionController
                         $params['val'] = '%' . $filterValue . '%';
                     }
 
-                    // Date / Month Filters (Matches posted_date or updated_at date part)
-                    if ($filterDate !== "") {
-                        $where .= " AND DATE(COALESCE(asup.posted_date, asup.updated_at)) = :filter_date";
-                        $params['filter_date'] = $filterDate;
+                    // Day, Month, Year Filters (extracted from posted_date / updated_at)
+                    if ($filterDay !== "") {
+                        $where .= " AND EXTRACT(DAY FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_day";
+                        $params['filter_day'] = (int)$filterDay;
                     }
                     if ($filterMonth !== "") {
-                        $where .= " AND TO_CHAR(COALESCE(asup.posted_date, asup.updated_at), 'YYYY-MM') = :filter_month";
-                        $params['filter_month'] = $filterMonth;
+                        $where .= " AND EXTRACT(MONTH FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_month";
+                        $params['filter_month'] = (int)$filterMonth;
+                    }
+                    if ($filterYear !== "") {
+                        $where .= " AND EXTRACT(YEAR FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_year";
+                        $params['filter_year'] = (int)$filterYear;
                     }
 
                     // Status Filters
