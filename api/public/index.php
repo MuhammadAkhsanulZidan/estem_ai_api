@@ -89,6 +89,7 @@ try {
 
 
     $router->get('/v1/ecrf-templates', [GlobalEcrfController::class, 'get']);
+    $router->get('/v1/ecrf-templates/detail', [GlobalEcrfController::class, 'detail']);
     $router->post('/v1/ecrf-templates', [GlobalEcrfController::class, 'post']);
 
     $router->get('/v1/global-protocol-template', [GlobalProtocolTemplateController::class, 'get']);

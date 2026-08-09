@@ -6,80 +6,97 @@ use App\Config\Database;
 use App\Middleware\AuthMiddleware;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
+use App\Constants\ROLE_NAME;
 use PDO;
 
 class GlobalEcrfController
 {
     /**
-     * Retrieve global E-CRF templates.
+     * Retrieve global E-CRF templates list.
      */
     public function get()
     {
-        AuthMiddleware::authorize(['admin', 'affiliator']);
+        AuthMiddleware::authorize([ROLE_NAME::ADMIN, ROLE_NAME::AFFILIATOR]);
+
+        try {
+            $pdo = Database::getConnection();
+            $stmt = $pdo->query("
+                SELECT 
+                    es.id AS section_id,
+                    es.section_name,
+                    get.questions_schema
+                FROM ecrf_sections es
+                LEFT JOIN ecrf_templates get ON es.id = get.section_id
+                ORDER BY es.id ASC
+            ");
+            $rows = $stmt->fetchAll();
+
+            $rawSections = [
+                'persiapan' => [],
+                'pelaksanaan' => [],
+                'monitoring' => [],
+                'evaluasi' => [],
+            ];
+
+            $sectionMap = [
+                1 => 'persiapan',
+                2 => 'pelaksanaan',
+                3 => 'monitoring',
+                4 => 'evaluasi'
+            ];
+
+            foreach ($rows as $row) {
+                $secId = (int)$row['section_id'];
+                $secKey = $sectionMap[$secId] ?? ('section_' . $secId);
+                $rawSections[$secKey] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
+            }
+
+            $sections = [
+                'persiapan' => [
+                    'questions' => $rawSections['persiapan'],
+                    'is_locked' => false
+                ],
+                'pelaksanaan' => [
+                    'questions' => $rawSections['pelaksanaan'],
+                    'is_locked' => false
+                ],
+                'monitoring' => [
+                    'questions' => $rawSections['monitoring'],
+                    'is_locked' => false
+                ],
+                'evaluasi' => [
+                    'questions' => $rawSections['evaluasi'],
+                    'is_locked' => false
+                ]
+            ];
+
+            (new ApiResponse(true, 'Global E-CRF templates retrieved successfully', $sections))->send(200);
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Retrieve a single E-CRF template section detail.
+     */
+    public function detail()
+    {
+        AuthMiddleware::authorize([ROLE_NAME::ADMIN, ROLE_NAME::AFFILIATOR]);
 
         try {
             $pdo = Database::getConnection();
             $sectionId = $_GET['section_id'] ?? null;
 
-            if ($sectionId !== null) {
-                $stmt = $pdo->prepare("SELECT * FROM ecrf_templates WHERE section_id = :section_id");
-                $stmt->execute(['section_id' => (int)$sectionId]);
-                $ecrf = $stmt->fetch();
-                $data = $ecrf ? json_decode($ecrf['questions_schema'], true) : [];
-                (new ApiResponse(true, 'E-CRF template retrieved successfully', $data))->send(200);
-            } else {
-                $stmt = $pdo->query("
-                    SELECT 
-                        es.id AS section_id,
-                        es.section_name,
-                        get.questions_schema
-                    FROM ecrf_sections es
-                    LEFT JOIN ecrf_templates get ON es.id = get.section_id
-                    ORDER BY es.id ASC
-                ");
-                $rows = $stmt->fetchAll();
-
-                $rawSections = [
-                    'persiapan' => [],
-                    'pelaksanaan' => [],
-                    'monitoring' => [],
-                    'evaluasi' => [],
-                ];
-
-                $sectionMap = [
-                    1 => 'persiapan',
-                    2 => 'pelaksanaan',
-                    3 => 'monitoring',
-                    4 => 'evaluasi'
-                ];
-
-                foreach ($rows as $row) {
-                    $secId = (int)$row['section_id'];
-                    $secKey = $sectionMap[$secId] ?? ('section_' . $secId);
-                    $rawSections[$secKey] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
-                }
-
-                $sections = [
-                    'persiapan' => [
-                        'questions' => $rawSections['persiapan'],
-                        'is_locked' => false
-                    ],
-                    'pelaksanaan' => [
-                        'questions' => $rawSections['pelaksanaan'],
-                        'is_locked' => false
-                    ],
-                    'monitoring' => [
-                        'questions' => $rawSections['monitoring'],
-                        'is_locked' => false
-                    ],
-                    'evaluasi' => [
-                        'questions' => $rawSections['evaluasi'],
-                        'is_locked' => false
-                    ]
-                ];
-
-                (new ApiResponse(true, 'Global E-CRF templates retrieved successfully', $sections))->send(200);
+            if ($sectionId === null) {
+                (new ApiResponse(false, 'Section ID is required'))->send(400);
             }
+
+            $stmt = $pdo->prepare("SELECT * FROM ecrf_templates WHERE section_id = :section_id");
+            $stmt->execute(['section_id' => (int)$sectionId]);
+            $ecrf = $stmt->fetch();
+            $data = $ecrf ? json_decode($ecrf['questions_schema'], true) : [];
+
+            (new ApiResponse(true, 'E-CRF template retrieved successfully', $data))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -90,7 +107,7 @@ class GlobalEcrfController
      */
     public function post()
     {
-        $user = AuthMiddleware::authorize(['admin']);
+        $user = AuthMiddleware::authorize([ROLE_NAME::ADMIN]);
 
         try {
             $pdo = Database::getConnection();
@@ -136,9 +153,9 @@ class GlobalEcrfController
                 VALUES (:section_id, :questions_schema::jsonb, :user_id, :user_id, NOW(), NOW())
                 ON CONFLICT (section_id) 
                 DO UPDATE SET 
-                	questions_schema = EXCLUDED.questions_schema,
-                	updated_by = EXCLUDED.updated_by,
-                	updated_at = NOW()
+                    questions_schema = EXCLUDED.questions_schema,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = NOW()
                 RETURNING *
             ");
 
