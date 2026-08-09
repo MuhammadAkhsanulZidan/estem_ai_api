@@ -22,6 +22,10 @@ class RequestHelper {
         $isEncrypted = filter_var($_GET['is_enc'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $rawInput = file_get_contents('php://input');
 
+        if (trim($rawInput) === '') {
+            return [];
+        }
+
         if ($isEncrypted) {
             $requestData = json_decode($rawInput, true);
             if (!isset($requestData['iv'], $requestData['c'], $requestData['t'])) {
@@ -62,6 +66,61 @@ class RequestHelper {
         }
 
         return $input;
+    }
+
+    /**
+     * Resolves a database document path to a full HTTPS URL based on user role,
+     * converting raw public paths to short asset URLs.
+     */
+    public static function getDocumentUrl(string $path, string $roleName = 'affiliator'): string
+    {
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Replace public/bck prefix with assets
+        $cleanPath = ltrim($path, '/');
+        if (str_starts_with($cleanPath, 'public/bck/')) {
+            $cleanPath = 'assets/' . substr($cleanPath, 11);
+        }
+
+        $roleName = strtolower($roleName);
+        $domain = 'jej-estemai.zendekia.com';
+        if ($roleName === 'admin') {
+            $domain = 'adm-estemai.zendekia.com';
+        } elseif ($roleName === 'reviewer') {
+            $domain = 'rev-estemai.zendekia.com';
+        }
+
+        return "https://{$domain}/" . ltrim($cleanPath, '/');
+    }
+
+    /**
+     * Get affiliator ID based on user ID and role.
+     * Admins/reviewers can specify affiliator_id in $_GET or request body,
+     * while affiliators are locked to their own linked affiliator_id.
+     */
+    public static function getAffiliatorId(PDO $pdo, int $userId, string $roleName): int
+    {
+        $roleName = strtolower($roleName);
+        if ($roleName === 'admin' || $roleName === 'reviewer') {
+            $body = self::getBody();
+            $affiliatorId = $_GET['affiliator_id'] ?? $body['affiliator_id'] ?? null;
+            if ($affiliatorId !== null) {
+                return (int)$affiliatorId;
+            }
+        }
+
+        $stmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+        $stmt->execute(['id' => $userId]);
+        $affiliatorId = $stmt->fetchColumn();
+
+        if (!$affiliatorId) {
+            (new ApiResponse(false, 'User is not linked to any affiliator.'))->send(400);
+            exit;
+        }
+
+        return (int)$affiliatorId;
     }
 
     /**

@@ -9,6 +9,15 @@ header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Access-Control-Max-Age: 86400"); // Cache preflight for 24h
 
+// Support HTTP Method Spoofing for multipart uploads (e.g. PUT/DELETE via POST)
+$method = $_SERVER['REQUEST_METHOD'];
+if ($method === 'POST') {
+    $spoofedMethod = $_POST['_method'] ?? $_GET['_method'] ?? null;
+    if ($spoofedMethod && in_array(strtoupper($spoofedMethod), ['PUT', 'DELETE', 'PATCH'])) {
+        $_SERVER['REQUEST_METHOD'] = strtoupper($spoofedMethod);
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit();
@@ -117,6 +126,7 @@ try {
     $router->get('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'get']);
     $router->get('/v1/affiliator-supervisions/detail', [AffiliatorSupervisionController::class, 'detail']);
     $router->post('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'post']);
+    $router->put('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'put']);
     $router->delete('/v1/affiliator-supervisions/documents', [AffiliatorSupervisionController::class, 'deleteDocument']);
     $router->post('/v1/affiliator-supervisions/review', [AffiliatorSupervisionController::class, 'review']);
 
