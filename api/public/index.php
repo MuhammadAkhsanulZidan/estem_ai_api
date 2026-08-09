@@ -93,6 +93,7 @@ try {
     $router->delete('/v1/users', [UserController::class, 'delete']);
 
     $router->get('/v1/affiliators', [AffiliatorController::class, 'get']);
+    $router->get('/v1/affiliators', [AffiliatorController::class, 'get']);
     $router->post('/v1/affiliators', [AffiliatorController::class, 'post']);
     $router->put('/v1/affiliators', [AffiliatorController::class, 'put']);
     $router->post('/v1/affiliators/review', [AffiliatorController::class, 'review_affiliator']);
@@ -112,10 +113,13 @@ try {
     $router->post('/v1/admin/protocols/assign-reviewer', [AffiliatorProtocolController::class, 'assignReviewer']);
     $router->get('/v1/reviewer/affiliator-protocols', [AffiliatorProtocolController::class, 'getReviewList']);
     $router->post('/v1/reviewer/affiliator-protocols/review', [AffiliatorProtocolController::class, 'reviewProtocol']);
+
     $router->get('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'get']);
+    $router->get('/v1/affiliator-supervisions/detail', [AffiliatorSupervisionController::class, 'detail']);
     $router->post('/v1/affiliator-supervisions', [AffiliatorSupervisionController::class, 'post']);
     $router->delete('/v1/affiliator-supervisions/documents', [AffiliatorSupervisionController::class, 'deleteDocument']);
     $router->post('/v1/affiliator-supervisions/review', [AffiliatorSupervisionController::class, 'review']);
+
     $router->get('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'get']);
     $router->post('/v1/patient-ecrf-responses', [PatientEcrfController::class, 'post']);
     $router->get('/v1/reviewer/patient-ecrfs', [PatientEcrfController::class, 'getReviewList']);

@@ -3,182 +3,34 @@
 namespace App\Controllers;
 
 use App\Config\Database;
+use App\Constants\ROLE_NAME;
 use App\Middleware\AuthMiddleware;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
 use App\Helpers\StatusHelper;
+
 use PDO;
 
 class AffiliatorSupervisionController
 {
-    /**
-    * Get active supervision registration details and documents.
+    /*
     */
-    public function get()
+    public function detail()
     {
-        $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
+        $user = AuthMiddleware::authorize([ROLE_NAME::ADMIN, ROLE_NAME::AFFILIATOR, ROLE_NAME::REVIEWER]);
 
         try {
             $pdo = Database::getConnection();
             $userId = $user['data']['id'];
             $roleName = strtolower($user['data']['role_name'] ?? '');
 
-            // 1. Resolve affiliator_id
-            $affiliatorId = $_GET['affiliator_id'] ?? null;
+            $affiliatorId = RequestHelper::getAffiliatorId($pdo, $userId, $roleName);
 
-            if ($affiliatorId === null && $roleName === 'affiliator') {
-                $affStmt = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :user_id");
-                $affStmt->execute(['user_id' => $userId]);
-                $affRow = $affStmt->fetch();
-                $affiliatorId = $affRow ? $affRow['affiliator_id'] : null;
-            }
-
-            // 2. Paginated List Branch
-            if ($affiliatorId === null) {
-                if ($roleName === "admin" || $roleName === "reviewer") {
-                    $filterField = $_GET['filter_field'] ?? "";
-                    $filterValue = $_GET['filter_value'] ?? "";
-                    $filterDay   = $_GET['filter_day'] ?? "";
-                    $filterMonth = $_GET['filter_month'] ?? "";
-                    $filterYear  = $_GET['filter_year'] ?? "";
-                    $isPosted    = $_GET['is_posted'] ?? "";
-                    $isReviewed  = $_GET['is_reviewed'] ?? "";
-                    $isApproved  = $_GET['is_approved'] ?? "";
-                    $statusFilter = $_GET['status'] ?? "";
-                    $pageNo      = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
-                    $pageRow     = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
-                    $useLimit    = $pageNo > 0 && $pageRow > 0;
-
-                    $where = 'WHERE 1=1';
-                    $params = [];
-
-                    $allowedFields = [
-                        'hospital_name' => 'aff.affiliator_name',
-                        'pic_name'      => 'asup.pic_name'
-                    ];
-
-                    // Text search filter
-                    if ($filterField !== "" && $filterValue !== "" && isset($allowedFields[$filterField])) {
-                        $column = $allowedFields[$filterField];
-                        $where .= " AND {$column} ILIKE :val";
-                        $params['val'] = '%' . $filterValue . '%';
-                    } else if ($filterValue !== "") {
-                        $where .= " AND (aff.affiliator_name ILIKE :val OR asup.pic_name ILIKE :val)";
-                        $params['val'] = '%' . $filterValue . '%';
-                    }
-
-                    // Day, Month, Year Filters (extracted from posted_date / updated_at)
-                    if ($filterDay !== "") {
-                        $where .= " AND EXTRACT(DAY FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_day";
-                        $params['filter_day'] = (int)$filterDay;
-                    }
-                    if ($filterMonth !== "") {
-                        $where .= " AND EXTRACT(MONTH FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_month";
-                        $params['filter_month'] = (int)$filterMonth;
-                    }
-                    if ($filterYear !== "") {
-                        $where .= " AND EXTRACT(YEAR FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_year";
-                        $params['filter_year'] = (int)$filterYear;
-                    }
-
-                    // Status Filters
-                    if ($statusFilter !== "") {
-                        $where .= " AND fn_filter_module_status(:status_filter, asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised)";
-                        $params['status_filter'] = $statusFilter;
-                    } else {
-                        if ($isPosted !== ""){
-                            $where .= " AND asup.is_posted = :is_posted";
-                            $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
-                        }
-                        if ($isReviewed !== ""){
-                            $where .= " AND asup.is_reviewed = :is_reviewed";
-                            $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
-                        }
-                        if ($isApproved !== ""){
-                            $where .= " AND asup.is_approved = :is_approved";
-                            $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
-                        }
-                    }
-
-                    // Count total distinct supervisions
-                    $countQuery = "
-                        SELECT COUNT(*)
-                        FROM affiliator_supervisions asup
-                        JOIN affiliators aff ON asup.affiliator_id = aff.id
-                        {$where}
-                    ";
-                    $countStmt = $pdo->prepare($countQuery);
-                    foreach ($params as $key => $val) {
-                        $countStmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
-                    }
-                    $countStmt->execute();
-                    $totalItems = (int)$countStmt->fetchColumn();
-
-                    // Single Query with aggregated documents array via PostgreSQL json_agg
-                    $query = "
-                        SELECT
-                            asup.*,
-                            fn_get_module_status(asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised) AS status,
-                            asup.is_posted as is_posted,
-                            aff.affiliator_name,
-                            aff.affiliator_type,
-                            COALESCE(asup.posted_date, asup.updated_at) as posted_date,
-                            aff.address,
-                            COALESCE(
-                                (
-                                    SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
-                                    FROM affiliator_supervision_documents doc
-                                    WHERE doc.supervision_id = asup.id
-                                ), '[]'::json
-                            ) AS documents
-                        FROM affiliator_supervisions asup
-                        JOIN affiliators aff ON asup.affiliator_id = aff.id
-                        {$where}
-                        ORDER BY asup.id DESC
-                    ";
-
-                    if ($useLimit) {
-                        $offset = ($pageNo - 1) * $pageRow;
-                        $query .= " LIMIT :limit OFFSET :offset";
-                    }
-
-                    $stmt = $pdo->prepare($query);
-                    foreach ($params as $key => $val) {
-                        $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
-                    }
-                    if ($useLimit) {
-                        $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
-                        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-                    }
-
-                    $stmt->execute();
-                    $supervisions = $stmt->fetchAll();
-
-                    // Decode JSON documents string returned by PostgreSQL
-                    foreach ($supervisions as &$sup) {
-                        $sup['documents'] = json_decode($sup['documents'] ?? '[]', true);
-                        $sup['status'] = StatusHelper::resolveStatus($sup);
-                    }
-
-                    $responseData = [
-                        'items'       => $supervisions,
-                        'total_items' => $totalItems,
-                        'page_no'     => $pageNo,
-                        'page_row'    => $pageRow
-                    ];
-
-                    (new ApiResponse(true, 'All supervisions retrieved successfully', $responseData))->send(200);
-                } else {
-                    (new ApiResponse(true, 'No affiliator associated', null))->send(200);
-                }
-            }
-
-            // 3. Single Affiliator Detail Branch
             $stmt = $pdo->prepare("
                 SELECT
                     asup.*,
                     fn_get_module_status(asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised) AS status,
-                    aff.affiliator_name AS hospital_name,
+                    aff.affiliator_name AS institution_name,
                     aff.affiliator_type AS institution_type,
                     aff.address,
                     COALESCE(
@@ -192,6 +44,7 @@ class AffiliatorSupervisionController
                 JOIN affiliators aff ON asup.affiliator_id = aff.id
                 WHERE asup.affiliator_id = :affiliator_id
             ");
+
             $stmt->execute(['affiliator_id' => $affiliatorId]);
             $supervision = $stmt->fetch();
 
@@ -199,15 +52,163 @@ class AffiliatorSupervisionController
                 $affStmt = $pdo->prepare("SELECT * FROM affiliators WHERE id = :id");
                 $affStmt->execute(['id' => $affiliatorId]);
                 $aff = $affStmt->fetch();
-
                 (new ApiResponse(true, 'No supervision progress found, returning profile defaults', null))->send(200);
             }
 
             $supervision['documents'] = json_decode($supervision['documents'] ?? '[]', true);
-            $supervision['status'] = StatusHelper::resolveStatus($supervision);
 
             (new ApiResponse(true, 'Supervision details retrieved successfully', $supervision))->send(200);
+
         } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+    * Get list of supervision registration details and documents.
+    */
+    public function get()
+    {
+        $user = AuthMiddleware::authorize([ROLE_NAME::ADMIN, ROLE_NAME::REVIEWER]);
+
+        try {
+            $pdo = Database::getConnection();
+            $userId = $user['data']['id'];
+
+            $filterField = $_GET['filter_field'] ?? "";
+            $filterValue = $_GET['filter_value'] ?? "";
+            $filterDay   = $_GET['filter_day'] ?? "";
+            $filterMonth = $_GET['filter_month'] ?? "";
+            $filterYear  = $_GET['filter_year'] ?? "";
+            $isPosted    = $_GET['is_posted'] ?? "";
+            $isReviewed  = $_GET['is_reviewed'] ?? "";
+            $isApproved  = $_GET['is_approved'] ?? "";
+            $statusFilter = $_GET['status'] ?? "";
+            $pageNo      = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
+            $pageRow     = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
+            $useLimit    = $pageNo > 0 && $pageRow > 0;
+
+            $where = 'WHERE 1=1';
+            $params = [];
+
+            $allowedFields = [
+                'hospital_name' => 'aff.affiliator_name',
+                'pic_name'      => 'asup.pic_name'
+            ];
+
+            // Text search filter
+            if ($filterField !== "" && $filterValue !== "" && isset($allowedFields[$filterField])) {
+                $column = $allowedFields[$filterField];
+                $where .= " AND {$column} ILIKE :val";
+                $params['val'] = '%' . $filterValue . '%';
+            } else if ($filterValue !== "") {
+                $where .= " AND (aff.affiliator_name ILIKE :val OR asup.pic_name ILIKE :val)";
+                $params['val'] = '%' . $filterValue . '%';
+            }
+
+            // Day, Month, Year Filters (extracted from posted_date / updated_at)
+            if ($filterDay !== "") {
+                $where .= " AND EXTRACT(DAY FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_day";
+                $params['filter_day'] = (int)$filterDay;
+            }
+            if ($filterMonth !== "") {
+                $where .= " AND EXTRACT(MONTH FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_month";
+                $params['filter_month'] = (int)$filterMonth;
+            }
+            if ($filterYear !== "") {
+                $where .= " AND EXTRACT(YEAR FROM COALESCE(asup.posted_date, asup.updated_at)) = :filter_year";
+                $params['filter_year'] = (int)$filterYear;
+            }
+
+            // Status Filters
+            if ($statusFilter !== "") {
+                $where .= " AND fn_filter_module_status(:status_filter, asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised)";
+                $params['status_filter'] = $statusFilter;
+            } else {
+                if ($isPosted !== ""){
+                    $where .= " AND asup.is_posted = :is_posted";
+                    $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
+                }
+                if ($isReviewed !== ""){
+                    $where .= " AND asup.is_reviewed = :is_reviewed";
+                    $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+                }
+                if ($isApproved !== ""){
+                    $where .= " AND asup.is_approved = :is_approved";
+                    $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+                }
+            }
+
+                // Count total distinct supervisions
+                $countQuery = "
+                    SELECT COUNT(*)
+                    FROM affiliator_supervisions asup
+                    JOIN affiliators aff ON asup.affiliator_id = aff.id
+                    {$where}
+                ";
+                $countStmt = $pdo->prepare($countQuery);
+                foreach ($params as $key => $val) {
+                    $countStmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                }
+                $countStmt->execute();
+                $totalItems = (int)$countStmt->fetchColumn();
+
+                // Single Query with aggregated documents array via PostgreSQL json_agg
+                $query = "
+                    SELECT
+                        asup.*,
+                        fn_get_module_status(asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised) AS status,
+                        asup.is_posted as is_posted,
+                        aff.affiliator_name,
+                        aff.affiliator_type,
+                        COALESCE(asup.posted_date, asup.updated_at) as posted_date,
+                        aff.address,
+                        COALESCE(
+                            (
+                                SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
+                                FROM affiliator_supervision_documents doc
+                                WHERE doc.supervision_id = asup.id
+                            ), '[]'::json
+                        ) AS documents
+                    FROM affiliator_supervisions asup
+                    JOIN affiliators aff ON asup.affiliator_id = aff.id
+                    {$where}
+                    ORDER BY asup.id DESC
+                ";
+
+                if ($useLimit) {
+                    $offset = ($pageNo - 1) * $pageRow;
+                    $query .= " LIMIT :limit OFFSET :offset";
+                }
+
+                $stmt = $pdo->prepare($query);
+                foreach ($params as $key => $val) {
+                    $stmt->bindValue(':' . $key, $val, PDO::PARAM_STR);
+                }
+                if ($useLimit) {
+                    $stmt->bindValue(':limit', $pageRow, PDO::PARAM_INT);
+                    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+                }
+
+                $stmt->execute();
+                $supervisions = $stmt->fetchAll();
+
+                // Decode JSON documents string returned by PostgreSQL
+                foreach ($supervisions as &$sup) {
+                    $sup['documents'] = json_decode($sup['documents'] ?? '[]', true);
+                    $sup['status'] = StatusHelper::resolveStatus($sup);
+                }
+
+                $responseData = [
+                    'items'       => $supervisions,
+                    'total_items' => $totalItems,
+                    'page_no'     => $pageNo,
+                    'page_row'    => $pageRow
+                ];
+
+            (new ApiResponse(true, 'All supervisions retrieved successfully', $responseData))->send(200);
+
+            } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
     }
@@ -414,7 +415,7 @@ class AffiliatorSupervisionController
             $stmt = $pdo->prepare("
                 UPDATE affiliator_supervisions
                 SET review_notes = :review_notes,
-                    (is_posted, is_reviewed, is_approved, is_revised) = 
+                    (is_posted, is_reviewed, is_approved, is_revised) =
                         (SELECT is_posted, is_reviewed, is_approved, is_revised FROM fn_set_module_status(:status)),
                     approved_by = CASE WHEN :is_approved_status = true THEN :approved_user_id::integer ELSE approved_by END,
                     approved_at = CASE WHEN :is_approved_status2 = true THEN NOW() ELSE approved_at END,
