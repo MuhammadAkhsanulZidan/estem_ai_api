@@ -349,6 +349,7 @@ CREATE TABLE public.affiliator_protocols (
     is_approved boolean DEFAULT false NOT NULL,
     creator_note character varying(100),
     reviewer_note character varying(100),
+    posted_date timestamp without time zone,
     created_at timestamp without time zone DEFAULT now(),
     create_by bigint,
     updated_at timestamp without time zone DEFAULT now(),

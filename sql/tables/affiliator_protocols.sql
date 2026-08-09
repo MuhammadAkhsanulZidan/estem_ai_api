@@ -12,6 +12,7 @@ CREATE TABLE affiliator_protocols (
     is_approved BOOLEAN NOT NULL DEFAULT FALSE,
     creator_note    VARCHAR(100),
     reviewer_note VARCHAR(255),
+    posted_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
     create_by  BIGINT,
     updated_at TIMESTAMP DEFAULT NOW(),

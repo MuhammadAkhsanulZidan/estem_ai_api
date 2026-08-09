@@ -223,8 +223,8 @@ class AffiliatorProtocolController
             $flags = StatusHelper::mapStatusToFlags($statusId);
 
             $stmt = $pdo->prepare("
-                INSERT INTO affiliator_protocols (affiliator_id, protocol_name, indication, protocol_version, is_posted, is_reviewed, is_revised, is_approved, creator_note, reviewer_note, create_by, created_at, updated_at)
-                VALUES (:affiliator_id, :protocol_name, :indication, :protocol_version, :is_posted, :is_reviewed, :is_revised, :is_approved, :creator_note, :reviewer_note, :create_by, NOW(), NOW())
+                INSERT INTO affiliator_protocols (affiliator_id, protocol_name, indication, protocol_version, is_posted, is_reviewed, is_revised, is_approved, creator_note, reviewer_note, create_by, created_at, updated_at, posted_date)
+                VALUES (:affiliator_id, :protocol_name, :indication, :protocol_version, :is_posted, :is_reviewed, :is_revised, :is_approved, :creator_note, :reviewer_note, :create_by, NOW(), NOW(), CASE WHEN :is_posted_check = true THEN NOW() ELSE NULL END)
                 RETURNING *
             ");
 
@@ -233,6 +233,7 @@ class AffiliatorProtocolController
             $stmt->bindValue(':indication', $indication, $indication === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':protocol_version', $protocolVersion, $protocolVersion === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':is_posted', $flags['is_posted'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_posted_check', $flags['is_posted'], PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $flags['is_reviewed'], PDO::PARAM_BOOL);
             $stmt->bindValue(':is_revised', $flags['is_revised'], PDO::PARAM_BOOL);
             $stmt->bindValue(':is_approved', $flags['is_approved'], PDO::PARAM_BOOL);
@@ -369,7 +370,8 @@ class AffiliatorProtocolController
                     creator_note = :creator_note,
                     reviewer_note = :reviewer_note,
                     updated_by = :updated_by,
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    posted_date = CASE WHEN :is_posted_check = true AND posted_date IS NULL THEN NOW() ELSE posted_date END
                 WHERE id = :id
                 RETURNING *
             ");
@@ -379,6 +381,7 @@ class AffiliatorProtocolController
             $stmt->bindValue(':indication', $indication, $indication === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':protocol_version', $protocolVersion, $protocolVersion === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $stmt->bindValue(':is_posted', $flags['is_posted'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':is_posted_check', $flags['is_posted'], PDO::PARAM_BOOL);
             $stmt->bindValue(':is_reviewed', $flags['is_reviewed'], PDO::PARAM_BOOL);
             $stmt->bindValue(':is_revised', $flags['is_revised'], PDO::PARAM_BOOL);
             $stmt->bindValue(':is_approved', $flags['is_approved'], PDO::PARAM_BOOL);
@@ -687,13 +690,15 @@ class AffiliatorProtocolController
                     is_reviewed = :is_reviewed,
                     is_revised = :is_revised,
                     is_approved = :is_approved,
-                    reviewer_note = :reviewer_note
+                    reviewer_note = :reviewer_note,
+                    posted_date = CASE WHEN :is_posted_check = 1 AND posted_date IS NULL THEN NOW() ELSE posted_date END
                 WHERE id = :id
                 RETURNING *
             ";
             $updateStmt = $pdo->prepare($updateSql);
             $updateStmt->execute([
                 'is_posted' => $flags['is_posted'] ? 1 : 0,
+                'is_posted_check' => $flags['is_posted'] ? 1 : 0,
                 'is_reviewed' => $flags['is_reviewed'] ? 1 : 0,
                 'is_revised' => $flags['is_revised'] ? 1 : 0,
                 'is_approved' => $flags['is_approved'] ? 1 : 0,
