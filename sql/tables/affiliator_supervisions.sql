@@ -25,10 +25,6 @@ CREATE TABLE affiliator_supervisions (
     CONSTRAINT check_approved_requires_posted
         CHECK (NOT is_approved OR is_posted),
 
-    -- Rule 2: cannot be revised unless is_posted
-    CONSTRAINT check_revised_requires_posted
-        CHECK (NOT is_revised OR is_posted),
-
     -- Rule 3: cannot be approved if revised is 1 (true)
     CONSTRAINT check_approved_when_not_review
         CHECK (NOT is_approved OR is_reviewed),

@@ -435,10 +435,8 @@ CREATE TABLE public.affiliator_supervisions (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     created_by integer,
     updated_by integer,
-    status character varying(50) DEFAULT 'draft'::character varying,
     CONSTRAINT check_approved_requires_posted CHECK (((NOT is_approved) OR is_posted)),
     CONSTRAINT check_approved_when_not_review CHECK (((NOT is_approved) OR is_reviewed)),
-    CONSTRAINT check_revised_requires_posted CHECK (((NOT is_revised) OR is_posted)),
     CONSTRAINT check_unposted_requires_unapproved CHECK ((is_posted OR (NOT is_approved)))
 );
 

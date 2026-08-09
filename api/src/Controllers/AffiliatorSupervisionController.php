@@ -44,6 +44,7 @@ class AffiliatorSupervisionController
                     $isPosted    = $_GET['is_posted'] ?? "";
                     $isReviewed  = $_GET['is_reviewed'] ?? "";
                     $isApproved  = $_GET['is_approved'] ?? "";
+                    $statusFilter = $_GET['status'] ?? "";
                     $pageNo      = isset($_GET['page_no']) ? (int)$_GET['page_no'] : 1;
                     $pageRow     = isset($_GET['page_row']) ? (int)$_GET['page_row'] : 10;
                     $useLimit    = $pageNo > 0 && $pageRow > 0;
@@ -81,17 +82,22 @@ class AffiliatorSupervisionController
                     }
 
                     // Status Filters
-                    if ($isPosted !== ""){
-                        $where .= " AND asup.is_posted = :is_posted";
-                        $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
-                    }
-                    if ($isReviewed !== ""){
-                        $where .= " AND asup.is_reviewed = :is_reviewed";
-                        $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
-                    }
-                    if ($isApproved !== ""){
-                        $where .= " AND asup.is_approved = :is_approved";
-                        $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+                    if ($statusFilter !== "") {
+                        $where .= " AND fn_filter_module_status(:status_filter, asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised)";
+                        $params['status_filter'] = $statusFilter;
+                    } else {
+                        if ($isPosted !== ""){
+                            $where .= " AND asup.is_posted = :is_posted";
+                            $params['is_posted'] = ($isPosted === "1" || $isPosted === "true") ? 'true' : 'false';
+                        }
+                        if ($isReviewed !== ""){
+                            $where .= " AND asup.is_reviewed = :is_reviewed";
+                            $params['is_reviewed'] = ($isReviewed === "1" || $isReviewed === "true") ? 'true' : 'false';
+                        }
+                        if ($isApproved !== ""){
+                            $where .= " AND asup.is_approved = :is_approved";
+                            $params['is_approved'] = ($isApproved === "1" || $isApproved === "true") ? 'true' : 'false';
+                        }
                     }
 
                     // Count total distinct supervisions
@@ -112,6 +118,7 @@ class AffiliatorSupervisionController
                     $query = "
                         SELECT
                             asup.*,
+                            fn_get_module_status(asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised) AS status,
                             asup.is_posted as is_posted,
                             aff.affiliator_name,
                             aff.affiliator_type,
@@ -170,6 +177,7 @@ class AffiliatorSupervisionController
             $stmt = $pdo->prepare("
                 SELECT
                     asup.*,
+                    fn_get_module_status(asup.is_posted, asup.is_reviewed, asup.is_approved, asup.is_revised) AS status,
                     aff.affiliator_name AS hospital_name,
                     aff.affiliator_type AS institution_type,
                     aff.address,
@@ -266,7 +274,7 @@ class AffiliatorSupervisionController
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW(),
                     posted_date = CASE WHEN EXCLUDED.is_posted = true AND affiliator_supervisions.posted_date IS NULL THEN NOW() ELSE affiliator_supervisions.posted_date END
-                RETURNING *
+                RETURNING *, fn_get_module_status(is_posted, is_reviewed, is_approved, is_revised) AS status
             ");
             $stmt->execute([
                 'reference_id' => $referenceId,
@@ -406,23 +414,18 @@ class AffiliatorSupervisionController
             $stmt = $pdo->prepare("
                 UPDATE affiliator_supervisions
                 SET review_notes = :review_notes,
-                    is_posted = :is_posted,
-                    is_reviewed = :is_reviewed,
-                    is_revised = :is_revised,
-                    is_approved = :is_approved,
+                    (is_posted, is_reviewed, is_approved, is_revised) = 
+                        (SELECT is_posted, is_reviewed, is_approved, is_revised FROM fn_set_module_status(:status)),
                     approved_by = CASE WHEN :is_approved_status = true THEN :approved_user_id::integer ELSE approved_by END,
                     approved_at = CASE WHEN :is_approved_status2 = true THEN NOW() ELSE approved_at END,
                     updated_by = :user_id::integer,
                     updated_at = NOW()
                 WHERE id = :id::integer
-                RETURNING *
+                RETURNING *, fn_get_module_status(is_posted, is_reviewed, is_approved, is_revised) AS status
             ");
 
             $stmt->bindValue(':review_notes', $reviewNotes === '' ? null : $reviewNotes, $reviewNotes === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-            $stmt->bindValue(':is_posted', $flags['is_posted'], PDO::PARAM_BOOL);
-            $stmt->bindValue(':is_reviewed', $flags['is_reviewed'], PDO::PARAM_BOOL);
-            $stmt->bindValue(':is_revised', $flags['is_revised'], PDO::PARAM_BOOL);
-            $stmt->bindValue(':is_approved', $flags['is_approved'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':status', $status, PDO::PARAM_STR);
             $stmt->bindValue(':is_approved_status', $isApprovedStatus, PDO::PARAM_BOOL);
             $stmt->bindValue(':is_approved_status2', $isApprovedStatus, PDO::PARAM_BOOL);
             $stmt->bindValue(':approved_user_id', $userId, PDO::PARAM_INT);
