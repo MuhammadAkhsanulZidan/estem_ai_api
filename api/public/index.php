@@ -65,7 +65,7 @@ use App\Controllers\AdverseEventController;
 use App\Controllers\ChatbotController;
 use App\Controllers\AffiliatorSummaryController;
 use App\Controllers\AdminSummaryController;
-use App\Controllers\GlobalEcrfController;
+use App\Controllers\EcrfTemplateController;
 use App\Controllers\GlobalProtocolTemplateController;
 
 try {
@@ -88,9 +88,9 @@ try {
     $router->delete('/v1/admin-protocols', [AdminProtocolController::class, 'delete']);
 
 
-    $router->get('/v1/ecrf-templates', [GlobalEcrfController::class, 'get']);
-    $router->get('/v1/ecrf-templates/detail', [GlobalEcrfController::class, 'detail']);
-    $router->post('/v1/ecrf-templates', [GlobalEcrfController::class, 'post']);
+    $router->get('/v1/ecrf-templates', [EcrfTemplateController::class, 'get']);
+    $router->get('/v1/ecrf-templates/detail', [EcrfTemplateController::class, 'detail']);
+    $router->post('/v1/ecrf-templates', [EcrfTemplateController::class, 'post']);
 
     $router->get('/v1/global-protocol-template', [GlobalProtocolTemplateController::class, 'get']);
     $router->post('/v1/global-protocol-template', [GlobalProtocolTemplateController::class, 'post']);

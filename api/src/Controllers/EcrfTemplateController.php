@@ -9,10 +9,10 @@ use App\Helpers\RequestHelper;
 use App\Constants\ROLE_NAME;
 use PDO;
 
-class GlobalEcrfController
+class EcrfTemplateController
 {
     /**
-     * Retrieve global E-CRF templates list.
+     * Retrieve E-CRF templates list.
      */
     public function get()
     {
@@ -33,22 +33,22 @@ class GlobalEcrfController
 
             $rawSections = [
                 'persiapan' => [],
-                'pelaksanaan' => [],
-                'monitoring' => [],
-                'evaluasi' => [],
+                'intervensi' => [],
+                'monitoring_evaluasi' => [],
             ];
 
             $sectionMap = [
                 1 => 'persiapan',
-                2 => 'pelaksanaan',
-                3 => 'monitoring',
-                4 => 'evaluasi'
+                2 => 'intervensi',
+                3 => 'monitoring_evaluasi',
             ];
 
             foreach ($rows as $row) {
                 $secId = (int)$row['section_id'];
                 $secKey = $sectionMap[$secId] ?? ('section_' . $secId);
-                $rawSections[$secKey] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
+                if (array_key_exists($secKey, $rawSections)) {
+                    $rawSections[$secKey] = json_decode($row['questions_schema'] ?? '[]', true) ?: [];
+                }
             }
 
             $sections = [
@@ -56,21 +56,17 @@ class GlobalEcrfController
                     'questions' => $rawSections['persiapan'],
                     'is_locked' => false
                 ],
-                'pelaksanaan' => [
-                    'questions' => $rawSections['pelaksanaan'],
+                'intervensi' => [
+                    'questions' => $rawSections['intervensi'],
                     'is_locked' => false
                 ],
-                'monitoring' => [
-                    'questions' => $rawSections['monitoring'],
-                    'is_locked' => false
-                ],
-                'evaluasi' => [
-                    'questions' => $rawSections['evaluasi'],
+                'monitoring_evaluasi' => [
+                    'questions' => $rawSections['monitoring_evaluasi'],
                     'is_locked' => false
                 ]
             ];
 
-            (new ApiResponse(true, 'Global E-CRF templates retrieved successfully', $sections))->send(200);
+            (new ApiResponse(true, 'E-CRF templates retrieved successfully', $sections))->send(200);
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
         }
@@ -103,7 +99,7 @@ class GlobalEcrfController
     }
 
     /**
-     * Save/Update E-CRF template for global template.
+     * Save/Update E-CRF template.
      */
     public function post()
     {
@@ -120,8 +116,8 @@ class GlobalEcrfController
                 (new ApiResponse(false, 'Section ID is required'))->send(400);
             }
 
-            if (!in_array((int)$sectionId, [1, 2, 3, 4])) {
-                (new ApiResponse(false, 'Invalid Section ID. Must be 1, 2, 3, or 4'))->send(400);
+            if (!in_array((int)$sectionId, [1, 2, 3])) {
+                (new ApiResponse(false, 'Invalid Section ID. Must be 1, 2, or 3'))->send(400);
             }
 
             // Backend UUID assignment
@@ -138,8 +134,6 @@ class GlobalEcrfController
                             mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
                         );
                     }
-                    // Ensure is_global is true
-                    $q['is_global'] = true;
                 }
                 unset($q);
             }

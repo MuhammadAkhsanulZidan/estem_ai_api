@@ -701,7 +701,7 @@ class AffiliatorProtocolController
             $sectionId = $_GET['section_id'] ?? null;
 
             if ($sectionId !== null) {
-                $gStmt = $pdo->prepare("SELECT questions_schema FROM global_ecrf_templates WHERE section_id = :section_id");
+                $gStmt = $pdo->prepare("SELECT questions_schema FROM ecrf_templates WHERE section_id = :section_id");
                 $gStmt->execute(['section_id' => (int)$sectionId]);
                 $gRow = $gStmt->fetch();
                 $globalQuestions = $gRow ? json_decode($gRow['questions_schema'] ?? '[]', true) : [];
@@ -716,7 +716,7 @@ class AffiliatorProtocolController
                 $data = array_merge($globalQuestions, $customQuestions);
                 (new ApiResponse(true, 'E-CRF retrieved successfully', $data))->send(200);
             } else {
-                $globalStmt = $pdo->prepare("SELECT section_id, questions_schema FROM global_ecrf_templates");
+                $globalStmt = $pdo->prepare("SELECT section_id, questions_schema FROM ecrf_templates");
                 $globalStmt->execute();
                 $globals = $globalStmt->fetchAll(PDO::FETCH_ASSOC);
                 $globalSchemaMap = [];
