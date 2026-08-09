@@ -7,25 +7,25 @@ use App\Middleware\AuthMiddleware;
 use App\Models\ApiResponse;
 use App\Helpers\RequestHelper;
 use App\Helpers\StatusHelper;
+use App\Constants\ROLE_NAME;
 use PDO;
 
 class AffiliatorProtocolController
 {
     /**
-    * Retrieve affiliator protocols (all or single by ID).
+    * Retrieve affiliator protocols list.
     */
     public function get()
     {
         try {
             $pdo = Database::getConnection();
-            $id = $_GET['id'] ?? null;
 
-            $user = AuthMiddleware::authorize(['affiliator', 'admin', 'reviewer']);
+            $user = AuthMiddleware::authorize([ROLE_NAME::AFFILIATOR, ROLE_NAME::ADMIN, ROLE_NAME::REVIEWER]);
             $roleName = $user['data']['role_name'] ?? '';
             $userId = $user['data']['id'] ?? null;
 
             $affiliatorId = null;
-            if ($roleName === 'affiliator') {
+            if ($roleName === ROLE_NAME::AFFILIATOR) {
                 $stmtUser = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
                 $stmtUser->execute(['id' => $userId]);
                 $affiliatorId = $stmtUser->fetchColumn();
@@ -33,38 +33,6 @@ class AffiliatorProtocolController
                     (new ApiResponse(false, 'User has no associated affiliator'))->send(403);
                     return;
                 }
-            }
-
-            if ($id !== null) {
-                $protocol = Database::fetch("
-                    SELECT
-                        ap.*,
-                        COALESCE(
-                            (
-                                SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
-                                FROM affiliator_protocol_documents doc
-                                WHERE doc.protocol_id = ap.id
-                            ), '[]'::json
-                        ) AS documents
-                    FROM affiliator_protocols ap
-                    WHERE ap.id = :id
-                ", ['id' => $id]);
-
-                if (!$protocol) {
-                    (new ApiResponse(false, 'Protocol not found'))->send(404);
-                    return;
-                }
-
-                if ($affiliatorId !== null && (int)$protocol['affiliator_id'] !== (int)$affiliatorId) {
-                    (new ApiResponse(false, 'Forbidden: You do not own this protocol'))->send(403);
-                    return;
-                }
-
-                $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
-                $protocol['status_id'] = StatusHelper::resolveStatus($protocol);
-
-                (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
-                return;
             }
 
             $params = [];
@@ -110,14 +78,7 @@ class AffiliatorProtocolController
                     SELECT
                         ap.*, aff.affiliator_name,
                         r.username as reviewer_username,
-                        r.full_name as reviewer_full_name,
-                        COALESCE(
-                            (
-                                SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
-                                FROM affiliator_protocol_documents doc
-                                WHERE doc.protocol_id = ap.id
-                            ), '[]'::json
-                        ) AS documents
+                        r.full_name as reviewer_full_name
                     FROM affiliator_protocols ap
                     LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
                     LEFT JOIN users r ON ap.reviewer_id = r.id
@@ -137,7 +98,6 @@ class AffiliatorProtocolController
                 filterFields: ['protocol_name', 'affiliator_name'],
                 mutateItems: function ($items) {
                     foreach ($items as &$p) {
-                        $p['documents'] = json_decode($p['documents'] ?? '[]', true);
                         $p['status_id'] = StatusHelper::resolveStatus($p);
                     }
                     return $items;
@@ -145,6 +105,73 @@ class AffiliatorProtocolController
             );
 
             (new ApiResponse(true, 'Protocols retrieved successfully', $responseData))->send(200);
+
+        } catch (\Throwable $e) {
+            (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);
+        }
+    }
+
+    /**
+     * Retrieve a single affiliator protocol detail by ID (including document list).
+     */
+    public function detail()
+    {
+        try {
+            $pdo = Database::getConnection();
+            $id = $_GET['id'] ?? null;
+
+            if ($id === null) {
+                (new ApiResponse(false, 'ID is required'))->send(400);
+                return;
+            }
+
+            $user = AuthMiddleware::authorize([ROLE_NAME::AFFILIATOR, ROLE_NAME::ADMIN, ROLE_NAME::REVIEWER]);
+            $roleName = $user['data']['role_name'] ?? '';
+            $userId = $user['data']['id'] ?? null;
+
+            $affiliatorId = null;
+            if ($roleName === ROLE_NAME::AFFILIATOR) {
+                $stmtUser = $pdo->prepare("SELECT affiliator_id FROM users WHERE id = :id");
+                $stmtUser->execute(['id' => $userId]);
+                $affiliatorId = $stmtUser->fetchColumn();
+                if (!$affiliatorId) {
+                    (new ApiResponse(false, 'User has no associated affiliator'))->send(403);
+                    return;
+                }
+            }
+
+            $protocol = Database::fetch("
+                SELECT
+                    ap.*, aff.affiliator_name,
+                    r.username as reviewer_username,
+                    r.full_name as reviewer_full_name,
+                    COALESCE(
+                        (
+                            SELECT json_agg(json_build_object('id', doc.id, 'document_path', doc.document_path))
+                            FROM affiliator_protocol_documents doc
+                            WHERE doc.protocol_id = ap.id
+                        ), '[]'::json
+                    ) AS documents
+                FROM affiliator_protocols ap
+                LEFT JOIN affiliators aff ON ap.affiliator_id = aff.id
+                LEFT JOIN users r ON ap.reviewer_id = r.id
+                WHERE ap.id = :id
+            ", ['id' => $id]);
+
+            if (!$protocol) {
+                (new ApiResponse(false, 'Protocol not found'))->send(404);
+                return;
+            }
+
+            if ($affiliatorId !== null && (int)$protocol['affiliator_id'] !== (int)$affiliatorId) {
+                (new ApiResponse(false, 'Forbidden: You do not own this protocol'))->send(403);
+                return;
+            }
+
+            $protocol['documents'] = json_decode($protocol['documents'] ?? '[]', true);
+            $protocol['status_id'] = StatusHelper::resolveStatus($protocol);
+
+            (new ApiResponse(true, 'Protocol retrieved successfully', $protocol))->send(200);
 
         } catch (\Throwable $e) {
             (new ApiResponse(false, 'Error: ' . $e->getMessage()))->send(500);

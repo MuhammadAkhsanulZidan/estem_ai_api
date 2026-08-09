@@ -117,6 +117,7 @@ try {
     $router->delete('/v1/affiliator/profile/documents', [AffiliatorProfileController::class, 'deleteDocument']);
 
     $router->get('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'get']);
+    $router->get('/v1/affiliator-protocols/detail', [AffiliatorProtocolController::class, 'detail']);
     $router->post('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'post']);
     $router->post('/v1/affiliator-protocols/update', [AffiliatorProtocolController::class, 'put']);
     $router->put('/v1/affiliator-protocols', [AffiliatorProtocolController::class, 'put']);
