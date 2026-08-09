@@ -43,11 +43,27 @@ class AffiliatorProtocolController
                 $params['affiliator_id'] = $affiliatorId;
             }
 
+            $filterDay   = $_GET['filter_day'] ?? "";
+            $filterMonth = $_GET['filter_month'] ?? "";
+            $filterYear  = $_GET['filter_year'] ?? "";
+
+            if ($filterDay !== "") {
+                $statusConditions[] = "EXTRACT(DAY FROM COALESCE(ap.posted_date, ap.updated_at)) = :filter_day";
+                $params['filter_day'] = (int)$filterDay;
+            }
+            if ($filterMonth !== "") {
+                $statusConditions[] = "EXTRACT(MONTH FROM COALESCE(ap.posted_date, ap.updated_at)) = :filter_month";
+                $params['filter_month'] = (int)$filterMonth;
+            }
+            if ($filterYear !== "") {
+                $statusConditions[] = "EXTRACT(YEAR FROM COALESCE(ap.posted_date, ap.updated_at)) = :filter_year";
+                $params['filter_year'] = (int)$filterYear;
+            }
+
             $isPosted   = $_GET['is_posted'] ?? "";
             $isRevised  = $_GET['is_revised'] ?? "";
             $isReviewed = $_GET['is_reviewed'] ?? "";
             $isApproved = $_GET['is_approved'] ?? "";
-
 
             // Status Filters
             if ($isPosted !== ""){
