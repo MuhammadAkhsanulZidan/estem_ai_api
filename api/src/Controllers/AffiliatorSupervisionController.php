@@ -247,6 +247,11 @@ class AffiliatorSupervisionController
 
             $postedDate = ($isPosted === 'true') ? date('Y-m-d H:i:s') : null;
 
+            $isRevisedUpdate = 'false';
+            if ($existing && $existing['is_revised'] && $isPosted === 'false') {
+                $isRevisedUpdate = 'true';
+            }
+
             // 2. Perform UPSERT on supervision metadata
             $stmt = $pdo->prepare("
                 INSERT INTO affiliator_supervisions (reference_id, affiliator_id, pic_name, is_posted, is_reviewed, is_approved, is_revised, created_by, updated_by, created_at, updated_at, posted_date)
@@ -257,7 +262,7 @@ class AffiliatorSupervisionController
                     is_posted = EXCLUDED.is_posted,
                     is_reviewed = false,
                     is_approved = false,
-                    is_revised = false,
+                    is_revised = :is_revised_update,
                     updated_by = EXCLUDED.updated_by,
                     updated_at = NOW(),
                     posted_date = CASE WHEN EXCLUDED.is_posted = true AND affiliator_supervisions.posted_date IS NULL THEN NOW() ELSE affiliator_supervisions.posted_date END
@@ -268,6 +273,7 @@ class AffiliatorSupervisionController
                 'affiliator_id' => $affiliatorId,
                 'pic_name' => $picName,
                 'is_posted' => $isPosted,
+                'is_revised_update' => $isRevisedUpdate,
                 'user_id' => $userId,
                 'posted_date' => $postedDate
             ]);
