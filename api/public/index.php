@@ -81,6 +81,7 @@ try {
     $router->get('/v1/admin-summary/reports/protocols', [AdminSummaryController::class, 'reportsProtocols']);
 
     $router->get('/v1/admin-protocols', [AdminProtocolController::class, 'get']);
+    $router->get('/v1/admin-protocols/detail', [AdminProtocolController::class, 'detail']);
     $router->post('/v1/admin-protocols', [AdminProtocolController::class, 'post']);
     $router->post('/v1/admin-protocols/update', [AdminProtocolController::class, 'put']);
     $router->put('/v1/admin-protocols', [AdminProtocolController::class, 'put']);
